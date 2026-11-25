@@ -1,0 +1,136 @@
+:root {
+  --bg: #ffffff; --panel: #f6f7f8; --text: #1c2024; --muted: #68717d; --line: #dfe3e8;
+  --accent: #17703f; --sel: #dcf2e5; --btn: #ffffff; --danger: #c62828; --shadow: 0 2px 10px rgba(0, 0, 0, .22);
+  --top: env(safe-area-inset-top, 0px); --bottom: env(safe-area-inset-bottom, 0px);
+  --left: env(safe-area-inset-left, 0px); --right: env(safe-area-inset-right, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #15181c; --panel: #1d2126; --text: #e7e9ec; --muted: #9aa3ad; --line: #2f353d;
+          --accent: #43bd7d; --sel: #1d3a2c; --btn: #262c33; --danger: #ef6a6a; --shadow: 0 2px 10px rgba(0, 0, 0, .6); }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { position: fixed; inset: 0; margin: 0; overflow: hidden; overscroll-behavior: none; }
+body { font: 15px/1.45 -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--bg); -webkit-text-size-adjust: 100%; }
+button, select, input { font: inherit; color: var(--text); }
+button { touch-action: manipulation; }
+input[type=range] { touch-action: none; }
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input[type=search] { -webkit-user-select: text; user-select: text; }
+button, select, input[type=search] { background: var(--btn); border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; min-height: 40px; }
+button:active { filter: brightness(.92); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--danger); }
+button.x { border: 0; background: none; font-size: 26px; line-height: 1; min-height: 40px; min-width: 40px; padding: 0; color: var(--muted); }
+
+#map { position: fixed; inset: 0; background: #e8ecef; }
+.leaflet-container { font: inherit; touch-action: none; }
+.leaflet-top.leaflet-left { margin-top: var(--top); margin-left: var(--left); }
+.leaflet-control-attribution { font-size: 10px; max-width: 70vw; background: rgba(255, 255, 255, .78) !important; color: #444; }
+.leaflet-control-attribution a { color: #1d5fa8; }
+.leaflet-control-scale-line { font-size: 10px; background: rgba(255, 255, 255, .78); }
+
+/* 右上角的悬浮按钮 */
+#fab { position: fixed; z-index: 500; top: calc(var(--top) + 12px); right: calc(var(--right) + 12px); display: flex; flex-direction: column; gap: 10px; }
+#fab button { width: 46px; height: 46px; padding: 0; border-radius: 13px; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); }
+#fab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#fab svg .fill { fill: currentColor; stroke: none; }
+#fab button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+#fab button.on.free { background: var(--btn); color: var(--accent); border-color: var(--accent); }
+
+/* 定位读数 / 下载进度 / 安装提示：竖着叠在左上角，互相不挡 */
+#stack { position: fixed; z-index: 550; top: calc(var(--top) + 54px); left: calc(var(--left) + 12px); right: calc(var(--right) + 70px); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none; }
+#stack > div { pointer-events: auto; max-width: 100%; padding: 8px 12px; border-radius: 11px; background: var(--bg); box-shadow: var(--shadow); font-size: 13px; line-height: 1.35; }
+#gps b { color: var(--accent); }
+#dl { width: 100%; }
+#dl i { display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
+#dl b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+#install { display: flex; align-items: center; gap: 6px; padding-right: 2px !important; }
+#install span { flex: 1; }
+
+/* 3D 视图（MapLibre）：和 2D 的 Leaflet 地图叠在同一个位置，切换时互相隐藏 */
+#map3d { position: fixed; inset: 0; display: none; background: #cfd6dd; }
+body.mode3d #map3d { display: block; }
+body.mode3d #map { visibility: hidden; }
+#fab button.txt { font-weight: 800; font-size: 15px; letter-spacing: .3px; }
+.maplibregl-ctrl-top-left { margin-top: var(--top); margin-left: var(--left); }
+.maplibregl-ctrl-scale { font-size: 10px; }
+.maplibregl-ctrl-attrib { font-size: 10px; max-width: calc(100vw - 92px - var(--left) - var(--right)); }
+.maplibregl-ctrl-attrib.maplibregl-compact { min-height: 24px; }
+.tip3d .maplibregl-popup-content { padding: 6px 9px; font: 12px/1.4 -apple-system, "PingFang SC", "Segoe UI", sans-serif; color: #1c2024; }
+
+/* 底部抽屉 */
+#sheet { position: fixed; z-index: 520; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: 0 -2px 14px rgba(0, 0, 0, .25); touch-action: pan-x pan-y; will-change: transform; }
+#grab { flex: none; touch-action: none; cursor: grab; padding: 0 calc(var(--right) + 14px) 6px calc(var(--left) + 14px); }
+#grab .handle { width: 40px; height: 5px; margin: 8px auto 6px; border-radius: 3px; background: var(--line); }
+#grab .head { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+#summary { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#btnImport { flex: none; }
+#body { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; border-top: 1px solid var(--line); padding: 0 var(--right) var(--pad, 24px) var(--left); }
+
+#detail { padding: 10px 14px 12px; border-bottom: 1px solid var(--line); background: var(--bg); }
+#detail .dt { display: flex; align-items: center; gap: 10px; }
+#detail .dn { flex: 1; min-width: 0; font-weight: 700; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { position: relative; flex: none; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); overflow: hidden; display: block; }
+.dot input { position: absolute; inset: -8px; width: 44px; height: 44px; opacity: 0; padding: 0; border: 0; cursor: pointer; }
+#detail .ds { margin: 2px 0 6px; font-size: 13px; color: var(--muted); }
+#pfWrap { position: relative; height: 150px; border-radius: 8px; background: var(--panel); touch-action: none; }
+#pfCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#pfNone { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+#detail .pi { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 4px 0; font-size: 13px; color: var(--muted); }
+#pfInfo { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pfClear { min-height: 28px; padding: 0 9px; font-size: 12px; }
+#detail .da { display: flex; gap: 8px; }
+#detail .da button { flex: 1; }
+
+#empty { padding: 18px 18px 8px; color: var(--muted); }
+#empty b { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
+#empty p { margin: 0 0 8px; }
+#tools { display: flex; gap: 8px; padding: 10px 14px 6px; }
+#tools input { flex: 1; min-width: 0; }
+#tools select { flex: none; max-width: 104px; }
+#tools button { flex: none; padding: 0 9px; font-size: 13px; }
+
+#list { list-style: none; margin: 0; padding: 0; }
+.row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.row.sel { background: var(--sel); }
+.row.off .nm, .row.off .sub { color: var(--muted); }
+.row .meta { flex: 1; min-width: 0; }
+.row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.row .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .eye { flex: none; position: relative; width: 44px; height: 44px; margin: -6px -8px -6px 0; display: flex; align-items: center; justify-content: center; }
+.row .eye input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; }
+.row .eye svg { width: 24px; height: 24px; fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.row.off .eye svg { stroke: var(--muted); opacity: .55; }
+
+/* 设置面板 */
+.overlay { position: fixed; z-index: 800; inset: 0; background: rgba(0, 0, 0, .42); display: flex; align-items: flex-end; justify-content: center; touch-action: pan-x pan-y; }
+.card { width: 100%; max-width: 560px; max-height: calc(100% - var(--top) - 24px); display: flex; flex-direction: column; border-radius: 18px 18px 0 0; background: var(--panel); }
+.card-h { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 16px; }
+.card-b { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 16px calc(var(--bottom) + 20px); }
+.card-b h3 { margin: 18px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.radios { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.radios label { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+.radios label:last-child { border-bottom: 0; }
+.radios small { color: var(--muted); }
+.rw { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.rw input[type=range] { flex: 1; min-width: 0; padding: 0; border: 0; background: none; }
+.rw input[type=checkbox], .radios input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.note { font-size: 13px; color: var(--muted); }
+.note a { color: var(--accent); }
+
+#toast { position: fixed; z-index: 900; left: 50%; bottom: 80px; transform: translateX(-50%); max-width: min(88vw, 420px); padding: 9px 14px; border-radius: 10px; background: rgba(20, 24, 28, .94); color: #fff; font-size: 14px; text-align: center; opacity: 0; pointer-events: none; transition: opacity .2s; }
+#toast.show { opacity: 1; }
+
+/* 地图上的小东西 */
+.me { position: relative; width: 18px; height: 18px; }
+.me i { position: absolute; inset: 0; border-radius: 50%; background: #1a73e8; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .25), 0 1px 5px rgba(0, 0, 0, .4); }
+.me::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; background: rgba(26, 115, 232, .22); animation: pulse 2s ease-out infinite; }
+@keyframes pulse { 0% { transform: scale(.55); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+.wp-pop .leaflet-popup-content { margin: 8px 11px; font-size: 13px; }
+
+@media (min-width: 700px) {
+  #stack { left: 424px; right: auto; max-width: min(380px, calc(100vw - 500px)); }
+  #sheet { left: 12px; right: auto; width: 400px; bottom: 12px; border-radius: 18px; }
+}

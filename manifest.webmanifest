@@ -1,0 +1,16 @@
+{
+  "name": "亚美尼亚徒步轨迹",
+  "short_name": "徒步轨迹",
+  "description": "多条路线分色显示、海拔剖面、离线地图，导入自己的 GPX / KML / GeoJSON 轨迹。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f7f8",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

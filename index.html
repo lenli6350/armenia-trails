@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>徒步轨迹</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="徒步轨迹">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15181c" media="(prefers-color-scheme: dark)">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="lib/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+<div id="map3d"></div>
+
+<div id="stack">
+  <div id="dl" hidden><span id="dlText"></span><i><b id="dlBar"></b></i></div>
+  <div id="gps" hidden></div>
+  <div id="install" hidden>
+    <span>想离线用：点 Safari 底部的「分享」→「添加到主屏幕」，以后只从主屏幕图标打开（在 Safari 里存的数据不会带过去）。</span>
+    <button type="button" id="installX" aria-label="关闭提示">×</button>
+  </div>
+</div>
+
+<div id="fab">
+  <button type="button" id="btnLocate" aria-label="我的位置">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" class="fill"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>
+  </button>
+  <button type="button" id="btnFit" aria-label="显示全部路线">
+    <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+  <button type="button" id="btn3d" class="txt" aria-label="3D 视图">3D</button>
+  <button type="button" id="btnSettings" aria-label="设置">
+    <svg viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></svg>
+  </button>
+</div>
+
+<section id="sheet" aria-label="路线列表">
+  <div id="grab">
+    <div class="handle"></div>
+    <div class="head">
+      <div id="summary">还没有路线</div>
+      <button type="button" id="btnImport" class="primary">＋ 导入</button>
+    </div>
+  </div>
+  <div id="body">
+    <div id="detail" hidden>
+      <div class="dt">
+        <label class="dot" title="更改颜色"><input type="color" id="dColor" aria-label="更改颜色"></label>
+        <div class="dn" id="dName"></div>
+        <button type="button" class="x" id="dClose" aria-label="取消选中">×</button>
+      </div>
+      <div class="ds" id="dStats"></div>
+      <div id="pfWrap"><canvas id="pfCanvas"></canvas><div id="pfNone" hidden>这条路线没有海拔数据</div></div>
+      <div class="pi"><span id="pfInfo"></span><button type="button" id="pfClear" hidden>清除标记</button></div>
+      <div class="da">
+        <button type="button" id="dFit">适应屏幕</button>
+        <button type="button" id="dHide">隐藏</button>
+        <button type="button" id="dDel" class="danger">删除</button>
+      </div>
+    </div>
+    <div id="empty" hidden>
+      <b>还没有路线</b>
+      <p>点右上的「＋ 导入」，选择 .gpx / .kml / .tcx / .geojson 文件（可以一次选很多个）。文件可以先放进手机的「文件」App、iCloud 云盘，或从邮件 / 微信 / Telegram 里存到手机再选。</p>
+      <p>导入后路线保存在这台手机里，没有网络也能看。</p>
+    </div>
+    <div id="tools" hidden>
+      <input type="search" id="q" placeholder="按名称筛选…" aria-label="按名称筛选" autocomplete="off">
+      <select id="sort" aria-label="排序">
+        <option value="add">添加顺序</option>
+        <option value="name">名称</option>
+        <option value="len">长度 ↓</option>
+        <option value="gain">爬升 ↓</option>
+      </select>
+      <button type="button" id="btnAll">全显</button>
+      <button type="button" id="btnNone">全隐</button>
+    </div>
+    <ul id="list"></ul>
+  </div>
+</section>
+
+<div id="settings" class="overlay" hidden>
+  <div class="card">
+    <div class="card-h"><b>设置</b><button type="button" id="btnCloseSettings" class="primary">完成</button></div>
+    <div class="card-b">
+      <h3>地图</h3>
+      <div id="baseList" class="radios"></div>
+      <h3>路线显示</h3>
+      <label class="rw">线宽 <input type="range" id="optWidth" min="2" max="9"><span id="optWidthVal"></span></label>
+      <label class="rw"><input type="checkbox" id="optEnds"> 起点●／终点○</label>
+      <label class="rw"><input type="checkbox" id="optHalo"> 白色描边（线更清楚）</label>
+      <label class="rw"><input type="checkbox" id="optWpts"> 显示航点（点一下看名称）</label>
+      <label class="rw"><input type="checkbox" id="optWake"> 屏幕常亮（用定位时有用，更耗电）</label>
+      <h3>地形（离线）</h3>
+      <div class="note" id="demNote"></div>
+      <label class="rw"><input type="checkbox" id="optHill"> 山体阴影（2D 地图上）</label>
+      <label class="rw">阴影浓度 <input type="range" id="optHillOp" min="0.2" max="1" step="0.05"><span id="optHillOpVal"></span></label>
+      <label class="rw">3D 地形夸张 <input type="range" id="optEx3d" min="1" max="3" step="0.1"><span id="optEx3dVal"></span></label>
+      <div class="note" style="margin:10px 0 6px">3D 视图的底图</div>
+      <div id="base3dList" class="radios"></div>
+      <div class="btns"><button type="button" id="btnRedem">重新下载地形数据</button></div>
+      <h3>路线数据</h3>
+      <div class="note" id="dataNote"></div>
+      <div class="btns"><button type="button" id="btnExport">导出备份…</button><button type="button" id="btnClear" class="danger">清空全部路线</button></div>
+      <h3>离线地图</h3>
+      <div class="note" id="offNote"></div>
+      <div class="btns"><button type="button" id="btnRedownload">重新下载</button><button type="button" id="btnResetBase" hidden>恢复默认离线地图</button></div>
+      <h3>关于</h3>
+      <div class="note" id="about"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+<input type="file" id="fileIn" multiple hidden>
+
+<script src="lib/leaflet.js"></script>
+<script src="lib/pmtiles.js"></script>
+<script src="lib/protomaps-leaflet.js"></script>
+<script src="terrain.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
