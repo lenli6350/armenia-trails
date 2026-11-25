@@ -54,6 +54,17 @@
       <button type="button" id="btnImport" class="primary">＋ 导入</button>
     </div>
   </div>
+  <div id="tools" hidden>
+    <input type="search" id="q" placeholder="按名称筛选…" aria-label="按名称筛选" autocomplete="off">
+    <select id="sort" aria-label="排序">
+      <option value="add">添加顺序</option>
+      <option value="name">名称</option>
+      <option value="len">长度 ↓</option>
+      <option value="gain">爬升 ↓</option>
+    </select>
+    <button type="button" id="btnAll">全显</button>
+    <button type="button" id="btnNone">全隐</button>
+  </div>
   <div id="body">
     <div id="detailHome">
       <div id="detail" hidden>
@@ -79,17 +90,6 @@
       <p>导入后路线保存在这台手机里，没有网络也能看。</p>
       <p>朋友发来了「分享链接」？到「设置 → 路线数据 → 导入分享链接」粘贴就行。</p>
     </div>
-    <div id="tools" hidden>
-      <input type="search" id="q" placeholder="按名称筛选…" aria-label="按名称筛选" autocomplete="off">
-      <select id="sort" aria-label="排序">
-        <option value="add">添加顺序</option>
-        <option value="name">名称</option>
-        <option value="len">长度 ↓</option>
-        <option value="gain">爬升 ↓</option>
-      </select>
-      <button type="button" id="btnAll">全显</button>
-      <button type="button" id="btnNone">全隐</button>
-    </div>
     <ul id="list"></ul>
   </div>
 </section>
@@ -105,7 +105,11 @@
       <label class="rw"><input type="checkbox" id="optEnds"> 起点●／终点○</label>
       <label class="rw"><input type="checkbox" id="optHalo"> 白色描边（线更清楚）</label>
       <label class="rw"><input type="checkbox" id="optWpts"> 显示航点（点一下看名称）</label>
-      <label class="rw"><input type="checkbox" id="optWake"> 屏幕常亮（用定位时有用，更耗电）</label>
+      <h3>徒步定位</h3>
+      <div class="note">点右上角的定位按钮：地图上出现蓝点，左上角的状态条告诉你<b>在不在路线上</b>。定位不需要网络，离线地图上一样能用；只在 App 开着、屏幕亮着时更新。</div>
+      <label class="rw"><input type="checkbox" id="optWake"> 屏幕常亮（徒步看位置时打开，更耗电）</label>
+      <label class="rw">离路线多远算「偏离」 <input type="range" id="optOff" min="15" max="100" step="5"><span id="optOffVal"></span></label>
+      <label class="rw"><input type="checkbox" id="optAlert"> 走偏时提醒（响声；iPhone 静音键开着时没声音，安卓还会震动）</label>
       <h3>地形（离线）</h3>
       <div class="note" id="demNote"></div>
       <label class="rw"><input type="checkbox" id="optHill"> 山体阴影（2D 地图上）</label>

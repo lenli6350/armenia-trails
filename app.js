@@ -19,7 +19,7 @@ if (typeof L === 'undefined' || typeof pmtiles === 'undefined' || typeof protoma
 }
 
 /* ================= 设置 ================= */
-const DEF = { base: 'auto', lineW: 4, ends: true, halo: true, wpts: false, sort: 'add', wake: false, colorSeq: 0, custom: null, hill: true, hillOp: 0.65, ex3d: 1.5, base3d: 'off' };
+const DEF = { base: 'auto', lineW: 4, ends: true, halo: true, wpts: false, sort: 'add', wake: false, colorSeq: 0, custom: null, hill: true, hillOp: 0.65, ex3d: 1.5, base3d: 'off', offDist: 30, alertOff: true };
 const S = Object.assign({}, DEF, (() => { try { return JSON.parse(localStorage.getItem('at-settings-v1')) || {}; } catch (e) { return {}; } })());
 const saveS = () => { try { localStorage.setItem('at-settings-v1', JSON.stringify(S)); } catch (e) { /* 隐私模式等：忽略 */ } };
 
@@ -197,17 +197,17 @@ function smooth(d, e) {
 // 距离按点间球面距离累加；累计爬升/下降在平滑后的海拔上用 3 米滞后阈值累计（估算值，和 Wikiloc 页面上的数会有出入）；最高/最低用原始值
 function analyze(r) {
   let n = 0; for (const a of r.segs) n += a.length >> 2;
-  const LA = new Float64Array(n), LO = new Float64Array(n), EL = new Float64Array(n), D = new Float64Array(n);
+  const LA = new Float64Array(n), LO = new Float64Array(n), EL = new Float64Array(n), D = new Float64Array(n), ST = new Uint8Array(n); // ST[j] = 1：第 j 个点是某一段的第一个点（段与段之间不连线）
   let k = 0, dist = 0, t0 = Infinity, t1 = -Infinity;
   for (const a of r.segs) {
     for (let i = 0; i < a.length; i += 4) {
       if (i) dist += hav(a[i - 4], a[i - 3], a[i], a[i + 1]);
-      LA[k] = a[i]; LO[k] = a[i + 1]; EL[k] = a[i + 2]; D[k] = dist; k++;
+      LA[k] = a[i]; LO[k] = a[i + 1]; EL[k] = a[i + 2]; D[k] = dist; ST[k] = i ? 0 : 1; k++;
       const t = a[i + 3];
       if (t === t) { if (t < t0) t0 = t; if (t > t1) t1 = t; }
     }
   }
-  r.flat = { n, LA, LO, EL, D };
+  r.flat = { n, LA, LO, EL, D, ST };
   r.dist = dist;
   r.dur = t1 > t0 ? t1 - t0 : null;
   r.t0 = Number.isFinite(t0) ? t0 : null; // 第一个点的时间，气泡里显示日期用
@@ -251,14 +251,36 @@ function niceStep(range, target) {
   const raw = range / target, pow = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / pow;
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pow;
 }
-// 一个定位点离这条路线最近的顶点：返回沿路线的累计距离和直线距离（米）
-function nearestOn(r, lat, lon) {
+// 一个定位点离这条路线最近的位置。按线段投影来算（不是只看拍下来的点：点稀疏的路线，人站在两点中间也是"在线上"），段与段之间不连线。
+// 返回 { m: 沿路线的累计距离, off: 离路线的直线距离（米）, lat, lon: 路线上最近的那个点, brg: 从我看向那个点的方位（度，北 = 0，顺时针） }
+// near：上一次匹配到的累计距离。往返 / 绕圈的路线，同一个地方有两处几乎一样近，这时取离 near 最近的那处，"走到哪了"才不会来回跳
+function nearestOn(r, lat, lon, near) {
   const f = r.flat;
-  if (!f.n) return null;
-  const kx = 111320 * Math.cos(lat * RAD), ky = 111320;
-  let best = Infinity, bj = 0;
-  for (let j = 0; j < f.n; j++) { const dx = (f.LO[j] - lon) * kx, dy = (f.LA[j] - lat) * ky, q = dx * dx + dy * dy; if (q < best) { best = q; bj = j; } }
-  return { m: f.D[bj], off: Math.sqrt(best) };
+  if (f.n < 2) return null;
+  const kx = 111320 * Math.cos(lat * RAD), ky = 111320, LA = f.LA, LO = f.LO, D = f.D, ST = f.ST;
+  const scan = (limit, pick) => { // limit：只看离得不超过这个平方距离的线段；pick(d2, j, t) 返回 true 表示采用
+    for (let j = 0; j + 1 < f.n; j++) {
+      if (ST[j + 1]) continue;
+      const ax = (LO[j] - lon) * kx, ay = (LA[j] - lat) * ky, dx = (LO[j + 1] - lon) * kx - ax, dy = (LA[j + 1] - lat) * ky - ay, l2 = dx * dx + dy * dy;
+      let t = l2 > 0 ? -(ax * dx + ay * dy) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = ax + t * dx, qy = ay + t * dy, d2 = qx * qx + qy * qy;
+      if (d2 <= limit) pick(d2, j, t, qx, qy);
+    }
+  };
+  let best = null;
+  scan(Infinity, (d2, j, t, qx, qy) => { if (!best || d2 < best.d2) best = { d2, j, t, qx, qy }; });
+  if (!best) return null;
+  if (near != null) { // 往返 / 绕圈：和最近的那处差不多近（15 米内）的几处里，挑离上次位置最近的
+    const lim = (Math.sqrt(best.d2) + 15) ** 2;
+    let bestGap = Infinity;
+    scan(lim, (d2, j, t, qx, qy) => { // 往回走（累计距离变小）的候选加一点罚分：原路返回的折返点两趟一样近，这样平局时算"继续往前走"
+      const m = D[j] + t * (D[j + 1] - D[j]), gap = m >= near ? m - near : (near - m) * 1.5 + 5;
+      if (gap < bestGap) { bestGap = gap; best = { d2, j, t, qx, qy }; }
+    });
+  }
+  const { j, t, qx, qy } = best;
+  return { m: D[j] + t * (D[j + 1] - D[j]), off: Math.sqrt(best.d2), lat: lat + qy / ky, lon: lon + qx / kx, brg: (Math.atan2(qx, qy) / RAD + 360) % 360 };
 }
 
 /* ================= 地图与底图 ================= */
@@ -542,7 +564,8 @@ function readInsets() {
 }
 function sheetH() {
   const H = innerHeight, head = grab.offsetHeight || 60, full = H - insetTop - 14;
-  return { peek: head + insetBottom + (wide() ? 12 : 0), half: Math.min(full, Math.max(head + 330, Math.round(H * 0.52))), full };
+  const tools = $('#tools'), th = tools.hidden ? 0 : tools.offsetHeight || 52; // 筛选栏固定在头部下面，半屏时把它的高度加上，列表能看到的区域才和原来一样
+  return { peek: head + insetBottom + (wide() ? 12 : 0), half: Math.min(full, Math.max(head + th + 330, Math.round(H * 0.52) + th)), full };
 }
 function layoutSheet(animate) {
   const h = sheetH();
@@ -643,7 +666,9 @@ function renderList() {
   filtered().sort(cmp).forEach(r => ul.appendChild((r.row = rowEl(r))));
   placeDetail();
   $('#empty').hidden = routes.length > 0;
-  $('#tools').hidden = routes.length === 0;
+  const tools = $('#tools'), wasHidden = tools.hidden;
+  tools.hidden = routes.length === 0;
+  if (wasHidden !== tools.hidden) layoutSheet(false); // 筛选栏出现 / 消失，抽屉高度要重新算
   updateSummary();
 }
 function markRows() {
@@ -913,8 +938,15 @@ $('#pfClear').onclick = () => { PF.hoverM = null; schedProfile(); };
 new ResizeObserver(() => schedProfile()).observe($('#pfWrap'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', schedProfile);
 
-/* ================= 我的位置 ================= */
-const GPS = { id: null, follow: false, ll: null, acc: 0, alt: null, dot: null, circ: null };
+/* ================= 我的位置：蓝点 + 「我在不在路线上」 ================= */
+// 定位不需要网络（卫星信号直接给位置），所以断网、用离线地图时一样能用。
+// 判断：选中了一条路线就看那一条（"我要沿着它走"）；没选就在所有显示着的路线里自动找最近的。
+// 离路线 ≤ 阈值 = 在路线上（绿）；超出一点、但还在定位误差范围内 = 靠近（黄）；再远 = 偏离（红，只有选中了路线才报偏离）；定位误差太大 / 位置太旧 = 灰，不下结论
+const GPS = { id: null, follow: false, ll: null, acc: 0, alt: null, t: 0, t0: 0, dot: null, circ: null, guide: null, tdot: null, st: { shown: null, cand: null, cnt: 0 }, last: null, lastTgt: null, tgt: null, other: null, tick: 0, ac: null };
+const GPS_OPT = { enableHighAccuracy: true, maximumAge: 4000, timeout: 30000 };
+const GCOL = { on: '#1b9e55', near: '#e69500', off: '#d93025' };
+const fmtM = m => m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+const dir8 = b => ['北', '东北', '东', '东南', '南', '西南', '西', '西北'][Math.round(b / 45) % 8]; // 方位角（北 = 0，顺时针）→ 八个方向
 function syncFab() {
   const b = $('#btnLocate');
   b.classList.toggle('on', GPS.id != null);
@@ -923,20 +955,26 @@ function syncFab() {
 function toggleLocate() {
   if (!navigator.geolocation) return toast('这个浏览器没有定位功能');
   if (GPS.id == null) {
-    GPS.follow = true;
-    GPS.id = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 4000, timeout: 30000 });
-    toast('正在定位…（第一次需要允许定位权限）', 3500);
+    GPS.follow = true; GPS.t = 0; GPS.t0 = Date.now(); GPS.last = null; GPS.lastTgt = null; GPS.st = { shown: null, cand: null, cnt: 0 };
+    GPS.id = navigator.geolocation.watchPosition(onPos, onPosErr, GPS_OPT);
+    initAlertAudio(); // 在点按钮这个动作里创建音频，iPhone 才允许后面自动响
+    GPS.tick = setInterval(() => updateGps(), 3000); // 没有新定位时也要刷新"多久以前"
+    toast('正在定位…（不需要网络）' + (S.wake ? '' : '。想一直看着位置，可在设置里打开「屏幕常亮」'), 5000);
   } else if (!GPS.follow) {
     GPS.follow = true;
     if (GPS.ll) centerOn(GPS.ll, Math.max(map.getZoom(), 15), true);
   } else stopGps();
   syncFab();
+  updateGps();
 }
 function stopGps() {
   if (GPS.id != null) navigator.geolocation.clearWatch(GPS.id);
-  GPS.id = null; GPS.follow = false; GPS.ll = null;
+  clearInterval(GPS.tick); GPS.tick = 0;
+  GPS.id = null; GPS.follow = false; GPS.ll = null; GPS.t = 0; GPS.tgt = null; GPS.other = null;
   if (GPS.dot) { map.removeLayer(GPS.dot); GPS.dot = null; }
   if (GPS.circ) { map.removeLayer(GPS.circ); GPS.circ = null; }
+  clearGuide();
+  if (GPS.ac) { try { GPS.ac.close(); } catch (e) { /* 忽略 */ } GPS.ac = null; }
   PF.gpsM = null;
   $('#gps').hidden = true;
   syncGps3d();
@@ -945,6 +983,7 @@ function stopGps() {
 function onPos(pos) {
   const c = pos.coords, ll = [c.latitude, c.longitude], first = !GPS.ll;
   GPS.ll = ll; GPS.acc = c.accuracy; GPS.alt = Number.isFinite(c.altitude) ? c.altitude : null;
+  GPS.t = pos.timestamp > 0 && Math.abs(Date.now() - pos.timestamp) < 60000 ? pos.timestamp : Date.now();
   if (!GPS.dot) {
     GPS.circ = L.circle(ll, { radius: c.accuracy, renderer, weight: 1, color: '#1a73e8', fillColor: '#1a73e8', fillOpacity: 0.12, interactive: false }).addTo(map);
     GPS.dot = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me"><i></i></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
@@ -952,34 +991,161 @@ function onPos(pos) {
   syncGps3d();
   if (first) centerOn(ll, Math.max(map.getZoom(), 15), false);
   else if (GPS.follow) centerOn(ll, null, true);
-  updateGps();
+  updateGps(true);
 }
 function onPosErr(err) {
   if (err.code === 1) { toast('没有定位权限。到「设置 → 隐私与安全性 → 定位服务」里允许 Safari 网站 / 本 App 使用定位', 9000); stopGps(); }
   else toast('暂时定位不到（' + (err.message || '信号弱') + '），会继续尝试', 4000);
 }
-function updateGps() {
-  const box = $('#gps');
-  if (GPS.id == null || !GPS.ll) { PF.gpsM = null; box.hidden = true; return; }
-  const parts = [`精度 ±${Math.round(GPS.acc)} m${GPS.acc > 100 ? '（较差）' : ''}`];
-  if (GPS.alt != null) parts.push(`海拔 ${Math.round(GPS.alt)} m`);
-  let prog = '';
-  PF.gpsM = null;
-  const r = selected;
-  if (r && r.segs.length) {
-    const n = nearestOn(r, GPS.ll[0], GPS.ll[1]);
-    if (n) {
-      if (n.off <= Math.max(150, GPS.acc * 2)) {
-        PF.gpsM = n.m;
-        const a = r.prof ? atDist(r.prof, Math.min(n.m, r.prof.total)) : null;
-        prog = `<br><b>在路线 ${(n.m / 1000).toFixed(2)} / ${(r.dist / 1000).toFixed(2)} km 处</b> · 还剩 ${((r.dist - n.m) / 1000).toFixed(2)} km` + (a && r.gain != null ? ` · 还要爬 ${Math.max(0, Math.round(r.gain - a.g))} m` : '');
-      } else prog = `<br>离「${esc(r.name)}」约 ${n.off >= 1000 ? (n.off / 1000).toFixed(1) + ' km' : Math.round(n.off) + ' m'}`;
-    }
+
+// 在 routes 里（不含 exclude）找离我最近的一条显示着的路线：先用外框排除远的，再精确算
+function autoPick(exclude) {
+  const [lat, lon] = GPS.ll, kx = 111320 * Math.cos(lat * RAD), T = S.offDist, cands = [];
+  for (const r of routes) {
+    if (r === exclude || !r.visible || r.flat.n < 2 || !r.bounds) continue;
+    const b = r.bounds;
+    cands.push({ r, bd: Math.hypot(Math.max(b.getWest() - lon, 0, lon - b.getEast()) * kx, Math.max(b.getSouth() - lat, 0, lat - b.getNorth()) * 111320) });
   }
-  box.innerHTML = parts.join(' · ') + prog;
+  cands.sort((a, b) => a.bd - b.bd);
+  let best = null, within = 0;
+  for (const c of cands) {
+    if (best && c.bd > Math.max(best.eff, T)) break;
+    const n = nearestOn(c.r, lat, lon, GPS.last && GPS.last.r === c.r ? GPS.last.m : null);
+    if (!n) continue;
+    const eff = n.off + (c.r.segs.length > 20 ? 15 : 0); // 整片路网（OSM 土路那种）排在普通路线后面
+    if (n.off <= T) within++;
+    if (!best || eff < best.eff) best = { r: c.r, n, auto: true, eff };
+  }
+  if (best) best.overlap = Math.max(0, within - (best.n.off <= T ? 1 : 0)); // 除了它之外，还有几条路线也在这儿
+  return best;
+}
+function clearGuide() {
+  if (GPS.guide) { map.removeLayer(GPS.guide); GPS.guide = null; }
+  if (GPS.tdot) { map.removeLayer(GPS.tdot); GPS.tdot = null; }
+}
+function initAlertAudio() {
+  if (!S.alertOff || GPS.ac) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try { GPS.ac = new AC(); GPS.ac.resume().catch(() => {}); } catch (e) { GPS.ac = null; }
+}
+// 偏离：三声低音 + 震动（iPhone 的网页不能震动，静音键打开时也没声音）；回到路线：一声高音
+function gpsBeep(kind) {
+  const ac = GPS.ac;
+  if (ac) {
+    try {
+      if (ac.state === 'suspended') ac.resume().catch(() => {});
+      const tone = (f, at, d) => {
+        const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + at;
+        o.frequency.value = f; o.connect(g); g.connect(ac.destination);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        o.start(t); o.stop(t + d + 0.05);
+      };
+      if (kind === 'off') { tone(620, 0, 0.25); tone(620, 0.35, 0.25); tone(480, 0.7, 0.45); } else tone(900, 0, 0.2);
+    } catch (e) { /* 忽略 */ }
+  }
+  if (kind === 'off' && navigator.vibrate) navigator.vibrate([250, 120, 250, 120, 250]);
+}
+function gpsAlert(kind, tg) {
+  const box = $('#gps');
+  if (kind === 'off') {
+    toast(`偏离路线了：离路线 ${fmtM(tg.n.off)}，往${dir8(tg.n.brg)}走回到路线`, 8000);
+    box.classList.remove('alert'); void box.offsetWidth; box.classList.add('alert');
+  } else toast('回到路线上了', 3000);
+  if (S.alertOff) gpsBeep(kind);
+}
+
+function updateGps(fresh) {
+  const box = $('#gps'), T = S.offDist;
+  if (GPS.id == null) { PF.gpsM = null; box.hidden = true; clearGuide(); return; }
+  if (!GPS.ll) { // 还在等第一次定位
+    box.className = 'st-wait';
+    box.innerHTML = `<div class="g1"><b>正在定位…</b></div><div class="g2">已等了 ${Math.round((Date.now() - GPS.t0) / 1000)} 秒。在室内、树下、峡谷里信号弱，到开阔的地方会快一些。定位不需要网络。</div>`;
+    box.hidden = false; PF.gpsM = null; clearGuide();
+    return;
+  }
+  const acc = GPS.acc || 0, age = (Date.now() - GPS.t) / 1000;
+  let tg = null;
+  if (selected && selected.flat.n > 1) {
+    const n = nearestOn(selected, GPS.ll[0], GPS.ll[1], GPS.last && GPS.last.r === selected ? GPS.last.m : null);
+    if (n) tg = { r: selected, n, auto: false, overlap: 0 };
+  } else tg = autoPick(null);
+  if ((tg && tg.r) !== GPS.lastTgt) { GPS.lastTgt = tg && tg.r; GPS.st = { shown: null, cand: null, cnt: 0 }; } // 换了路线：不用等，马上按新的算
+  // 先判断这一刻的状态
+  let raw;
+  if (age > 120) raw = 'stale';
+  else if (!routes.some(r => r.visible)) raw = 'noroute';
+  else if (acc > Math.max(60, 2 * T)) raw = 'weak';
+  else if (!tg) raw = 'none';
+  else if (tg.n.off <= T) raw = 'on';
+  else if (tg.n.off <= T + Math.min(acc, 100)) raw = 'near';
+  else raw = tg.auto ? 'none' : 'off';
+  // 在 绿 / 黄 / 红 之间切换要连续两次定位都一样，免得在边界上来回闪；其余状态立刻切
+  const s = GPS.st, prev = s.shown, reg = x => x === 'on' || x === 'near' || x === 'off';
+  if (!reg(raw) || !reg(prev)) { s.shown = raw; s.cand = raw; s.cnt = 0; }
+  else if (raw === s.shown) { s.cand = raw; s.cnt = 0; }
+  else if (fresh) { if (raw === s.cand) s.cnt++; else { s.cand = raw; s.cnt = 1; } if (s.cnt >= 2) { s.shown = raw; s.cnt = 0; } }
+  const shown = s.shown;
+  if (prev !== shown && tg && !tg.auto) { // 沿着选中的路线走：走偏了提醒一次，回来了说一声
+    if (shown === 'off' && (prev === 'on' || prev === 'near')) gpsAlert('off', tg);
+    else if (shown === 'on' && prev === 'off') gpsAlert('back', tg);
+  }
+  if (tg && reg(shown) && tg.n.off <= T + Math.min(acc, 100) + 50) GPS.last = { r: tg.r, m: tg.n.m }; // 记住"走到哪了"，往返 / 绕圈的路线靠它分清走的是哪一趟
+  GPS.tgt = tg;
+  // 显示
+  const n = tg && tg.n, nm = tg ? `「${esc(tg.r.name)}」` : '';
+  let h1 = '', t1 = '', h2 = '';
+  const prog = () => {
+    const r = tg.r, a = r.prof ? atDist(r.prof, Math.min(n.m, r.prof.total)) : null;
+    return `在路线 ${(n.m / 1000).toFixed(2)} / ${(r.dist / 1000).toFixed(2)} km 处 · 还剩 ${((r.dist - n.m) / 1000).toFixed(2)} km` + (a && r.gain != null ? ` · 还要爬 ${Math.max(0, Math.round(r.gain - a.g))} m` : '');
+  };
+  GPS.other = null;
+  if (shown === 'on') {
+    h1 = tg.auto ? `在${nm}上` : '在路线上'; t1 = n.off < 8 ? '' : `离路线 ${fmtM(n.off)}`;
+    h2 = prog() + (tg.overlap ? ` · 这里还有 ${tg.overlap} 条路线重合` : '');
+  } else if (shown === 'near') {
+    h1 = '靠近路线'; t1 = `约 ${fmtM(n.off)}`;
+    h2 = `误差 ±${Math.round(acc)} m，可能还在路线上 · 路线在你${dir8(n.brg)}边`;
+  } else if (shown === 'off') {
+    h1 = '偏离路线'; t1 = fmtM(n.off);
+    h2 = `往${dir8(n.brg)}走约 ${fmtM(n.off)} 回到路线（最近的点在路线 ${(n.m / 1000).toFixed(2)} km 处）`;
+    const o = autoPick(selected);
+    if (o && o.n.off <= T) { GPS.other = o.r; h2 += `<br>不过你在「${esc(o.r.name)}」上（点这里改看它）`; }
+  } else if (shown === 'weak') {
+    h1 = `定位不准（±${Math.round(acc)} m）`; h2 = acc > 500 ? '误差太大，没法判断是否在路线上。检查「设置 → 隐私与安全性 → 定位服务」里这个 App 的「精确位置」是不是开着。' : '误差太大，暂时没法判断是否在路线上；到开阔的地方等几秒会好一些。';
+  } else if (shown === 'stale') {
+    h1 = `位置已过时（${age < 3600 ? Math.round(age / 60) + ' 分钟' : '很久'}前）`; h2 = '没有收到新的定位。在峡谷、树下、室内信号会断；打开屏幕、到开阔的地方再看。';
+  } else if (shown === 'noroute') {
+    h1 = '定位中'; h2 = '还没有显示着的路线。导入、画一条，或在列表里打开一条，就能判断你在不在路线上。';
+  } else { // none
+    h1 = '附近没有路线';
+    h2 = n ? `最近的是${nm}，在你${dir8(n.brg)}边 ${fmtM(n.off)}` : '显示着的路线离这里都很远';
+  }
+  const tail = [`精度 ±${Math.round(acc)} m${acc > 100 ? '（较差）' : ''}`, GPS.alt != null ? `海拔 ${Math.round(GPS.alt)} m` : '', age > 20 && shown !== 'stale' ? `位置是 ${Math.round(age)} 秒前的` : ''].filter(Boolean).join(' · ');
+  const name = tg && !tg.auto && (shown === 'on' || shown === 'near' || shown === 'off') ? `${nm} · ` : '';
+  box.innerHTML = `<div class="g1"><b>${h1}</b>${t1 ? `<span>${t1}</span>` : ''}</div>${h2 ? `<div class="g2">${h2}</div>` : ''}<div class="g3">${name}${tail}</div>`;
+  box.className = 'st-' + shown + (box.classList.contains('alert') ? ' alert' : '');
   box.hidden = false;
+  // 地图上：靠近 / 偏离时，从我画一条虚线到路线上最近的点
+  if (tg && (shown === 'near' || shown === 'off') && n.off >= 8) {
+    const col = GCOL[shown], here = [n.lat, n.lon];
+    if (!GPS.guide) {
+      GPS.guide = L.polyline([GPS.ll, here], { renderer, color: col, weight: 3, dashArray: '7 6', opacity: 1, interactive: false }).addTo(map);
+      GPS.tdot = L.circleMarker(here, { renderer, radius: 7, weight: 3, color: col, fillColor: '#ffffff', fillOpacity: 1, interactive: false }).addTo(map);
+    } else { GPS.guide.setLatLngs([GPS.ll, here]).setStyle({ color: col }); GPS.tdot.setLatLng(here).setStyle({ color: col }); }
+    GPS.guide.bringToFront(); GPS.tdot.bringToFront();
+  } else clearGuide();
+  PF.gpsM = tg && !tg.auto && (shown === 'on' || shown === 'near') ? n.m : null; // 剖面图上的"我在这儿"
   schedProfile();
 }
+$('#gps').onclick = () => { const r = GPS.tgt && GPS.tgt.auto ? GPS.tgt.r : GPS.other; if (r) select(r, { open: true }); };
+$('#gps').addEventListener('animationend', e => e.currentTarget.classList.remove('alert')); // 闪完就去掉，免得状态条上一直留着这个类
+document.addEventListener('visibilitychange', () => { // 锁屏 / 切走再回来：位置多半是旧的，重新要一次
+  if (document.visibilityState !== 'visible' || GPS.id == null) return;
+  if (GPS.ac && GPS.ac.state === 'suspended') GPS.ac.resume().catch(() => {});
+  if (GPS.ll && Date.now() - GPS.t > 15000) { navigator.geolocation.clearWatch(GPS.id); GPS.id = navigator.geolocation.watchPosition(onPos, onPosErr, GPS_OPT); }
+  updateGps();
+});
 map.on('dragstart', () => { if (GPS.id != null && GPS.follow) { GPS.follow = false; syncFab(); } });
 
 /* ================= 导入 / 导出 ================= */
@@ -1086,6 +1252,7 @@ function buildBaseList() {
 async function refreshSettings() {
   $('#optWidth').value = S.lineW; $('#optWidthVal').textContent = S.lineW;
   $('#optEnds').checked = S.ends; $('#optHalo').checked = S.halo; $('#optWpts').checked = S.wpts; $('#optWake').checked = S.wake;
+  $('#optOff').value = S.offDist; $('#optOffVal').textContent = S.offDist + ' m'; $('#optAlert').checked = S.alertOff;
   $('#offNote').innerHTML = bm.state === 'ready'
     ? (S.custom ? `现在用的是你导入的离线地图：${esc(S.custom.name)}（${fmtMB(S.custom.size)}）。` : `已保存在本机（${fmtMB(bm.size)}）：${BASE.area}有街道级细节，亚美尼亚全境只到概略级别（大路、地名、河流）。数据是 Protomaps ${BASE.build} 的版本。`)
     : bm.state === 'loading' ? '正在准备…' : `没准备好：${esc(bm.err)}`;
@@ -1109,6 +1276,8 @@ $('#optEnds').onchange = e => { S.ends = e.target.checked; saveS(); routes.forEa
 $('#optHalo').onchange = e => { S.halo = e.target.checked; saveS(); routes.forEach(r => r.halo.setStyle({ opacity: S.halo ? 0.85 : 0 })); schedule3d(); };
 $('#optWpts').onchange = e => { S.wpts = e.target.checked; saveS(); routes.forEach(sync); schedule3d(); };
 $('#optWake').onchange = e => { S.wake = e.target.checked; saveS(); setWake(S.wake); };
+$('#optOff').oninput = e => { S.offDist = +e.target.value; $('#optOffVal').textContent = S.offDist + ' m'; saveS(); updateGps(); };
+$('#optAlert').onchange = e => { S.alertOff = e.target.checked; saveS(); if (S.alertOff && GPS.id != null) initAlertAudio(); };
 $('#base3dList').addEventListener('change', e => { if (e.target.name === 'base3d') { S.base3d = e.target.value; saveS(); apply3dBase(); } });
 $('#optHill').onchange = e => { S.hill = e.target.checked; saveS(); applyHill(); apply3dHill(); };
 $('#optHillOp').oninput = e => { S.hillOp = +e.target.value; $('#optHillOpVal').textContent = Math.round(S.hillOp * 100) + '%'; saveS(); if (dm.layer) dm.layer.setOpacity(S.hillOp); apply3dHill(); };
@@ -1845,6 +2014,6 @@ async function loadSaved() {
   refreshSettings();
   if (shared) Promise.resolve(openSharedFromHash()).finally(() => { if (!selected && routes.length) fitAll(); });
 }
-if (/(?:^#|&)debug\b/.test(location.hash)) window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, INFO, select, set3d, candidates2d, candidates3d, tapRoutes, DR, startDraw, exportRoute, gpxOf, shareEncode, shareDecode, shareUrlOf, openShared, openShare, SH_ }; // 测试用：地址后面加 #debug 才暴露
+if (/(?:^#|&)debug\b/.test(location.hash)) window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, INFO, select, set3d, candidates2d, candidates3d, tapRoutes, DR, startDraw, exportRoute, gpxOf, shareEncode, shareDecode, shareUrlOf, openShared, openShare, SH_, GPS, updateGps, nearestOn, autoPick, onPos, toggleLocate, setSheet }; // 测试用：地址后面加 #debug 才暴露
 boot();
 })();

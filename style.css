@@ -1,12 +1,12 @@
 :root {
   --bg: #ffffff; --panel: #f6f7f8; --text: #1c2024; --muted: #68717d; --line: #dfe3e8;
-  --accent: #17703f; --sel: #dcf2e5; --btn: #ffffff; --danger: #c62828; --shadow: 0 2px 10px rgba(0, 0, 0, .22);
+  --accent: #17703f; --sel: #dcf2e5; --btn: #ffffff; --danger: #c62828; --warn: #b36b00; --shadow: 0 2px 10px rgba(0, 0, 0, .22);
   --top: env(safe-area-inset-top, 0px); --bottom: env(safe-area-inset-bottom, 0px);
   --left: env(safe-area-inset-left, 0px); --right: env(safe-area-inset-right, 0px);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #15181c; --panel: #1d2126; --text: #e7e9ec; --muted: #9aa3ad; --line: #2f353d;
-          --accent: #43bd7d; --sel: #1d3a2c; --btn: #262c33; --danger: #ef6a6a; --shadow: 0 2px 10px rgba(0, 0, 0, .6); }
+          --accent: #43bd7d; --sel: #1d3a2c; --btn: #262c33; --danger: #ef6a6a; --warn: #f0b429; --shadow: 0 2px 10px rgba(0, 0, 0, .6); }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
@@ -41,7 +41,18 @@ button.x { border: 0; background: none; font-size: 26px; line-height: 1; min-hei
 /* 定位读数 / 下载进度 / 安装提示：竖着叠在左上角，互相不挡 */
 #stack { position: fixed; z-index: 550; top: calc(var(--top) + 54px); left: calc(var(--left) + 12px); right: calc(var(--right) + 70px); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none; }
 #stack > div { pointer-events: auto; max-width: 100%; padding: 8px 12px; border-radius: 11px; background: var(--bg); box-shadow: var(--shadow); font-size: 13px; line-height: 1.35; }
-#gps b { color: var(--accent); }
+/* 定位状态条：左边一道色条 + 大字结论。绿 = 在路线上，黄 = 靠近，红 = 偏离，灰 = 没法判断 */
+#gps { border-left: 6px solid var(--muted); padding-left: 10px !important; }
+#gps .g1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+#gps .g1 b { font-size: 16px; }
+#gps .g1 span { color: var(--muted); }
+#gps .g2 { margin-top: 2px; }
+#gps .g3 { margin-top: 3px; color: var(--muted); font-size: 12px; }
+#gps.st-on { border-left-color: var(--accent); } #gps.st-on .g1 b { color: var(--accent); }
+#gps.st-near { border-left-color: var(--warn); } #gps.st-near .g1 b { color: var(--warn); }
+#gps.st-off { border-left-color: var(--danger); } #gps.st-off .g1 b { color: var(--danger); }
+#gps.alert { animation: gpsflash .6s 4; }
+@keyframes gpsflash { 50% { background: rgba(217, 48, 37, .25); } }
 #dl { width: 100%; }
 #dl i { display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--line); overflow: hidden; }
 #dl b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
@@ -86,9 +97,10 @@ body.mode3d #map { visibility: hidden; }
 #empty { padding: 18px 18px 8px; color: var(--muted); }
 #empty b { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
 #empty p { margin: 0 0 8px; }
-#tools { display: flex; gap: 8px; padding: 10px 14px 6px; }
-#tools input { flex: 1; min-width: 0; }
-#tools select { flex: none; max-width: 104px; }
+/* 筛选栏固定在抽屉头部下面，不跟着列表一起滚；输入框和下拉框字号 16px，不然 iPhone 点进去时会自动把页面放大 */
+#tools { flex: none; display: flex; gap: 8px; padding: 2px calc(var(--right) + 14px) 8px calc(var(--left) + 14px); }
+#tools input { flex: 1; min-width: 0; padding: 0 10px; font-size: 16px; }
+#tools select { flex: none; max-width: 100px; padding: 0 4px 0 10px; font-size: 16px; }
 #tools button { flex: none; padding: 0 9px; font-size: 13px; }
 
 #list { list-style: none; margin: 0; padding: 0; }
