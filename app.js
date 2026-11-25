@@ -210,6 +210,7 @@ function analyze(r) {
   r.flat = { n, LA, LO, EL, D };
   r.dist = dist;
   r.dur = t1 > t0 ? t1 - t0 : null;
+  r.t0 = Number.isFinite(t0) ? t0 : null; // 第一个点的时间，气泡里显示日期用
   r.min = r.max = r.gain = r.loss = null;
   r.prof = null;
   const d = [], e = [], idx = [];
@@ -414,8 +415,7 @@ function mkRoute(rec, segs) {
   analyze(r);
   const common = { renderer, smoothFactor: 1.5, lineCap: 'round', lineJoin: 'round' };
   r.halo = L.polyline(r.ll, { ...common, color: esriHalo, weight: S.lineW + 3, opacity: S.halo ? 0.85 : 0, interactive: false });
-  r.line = L.polyline(r.ll, { ...common, color: r.color, weight: S.lineW, opacity: 0.95, bubblingMouseEvents: false });
-  r.line.on('click', () => select(r, { open: true }));
+  r.line = L.polyline(r.ll, { ...common, color: r.color, weight: S.lineW, opacity: 0.95, interactive: false }); // 点选统一由 map 的 click 处理（见 tapRoutes），这样才能一次找出重叠的好几条
   r.ends = [];
   if (r.ll.length) {
     const last = r.ll[r.ll.length - 1];
@@ -474,7 +474,7 @@ function setColor(r, c, persist) {
   if (r.ends[0]) r.ends[0].setStyle({ fillColor: c });
   if (r.ends[1]) r.ends[1].setStyle({ color: c });
   r.wptMarkers.forEach(m => m.setStyle({ color: c }));
-  if (r.row) r.row.querySelector('.dot').style.background = c;
+  if (r.row) { r.row.querySelector('.rowhead .dot').style.background = c; r.row.style.setProperty('--rc', c); }
   if (r === selected) { $('#dColor').parentElement.style.background = c; schedProfile(); }
   if (persist) saveMeta([r]);
   schedule3d();
@@ -499,10 +499,14 @@ function fitTo(b, maxZoom) {
   const m = mapInsets();
   map.fitBounds(b, { paddingTopLeft: [m.left + 24, m.top + 16], paddingBottomRight: [m.right + 8, m.bottom + 16], maxZoom: maxZoom || 16 });
 }
+// o.open：抽屉在最小状态时展开到半屏；o.fit：地图缩放到这条路线；o.keep：从列表里点的，保持被点那一行在屏幕上的位置；o.keepInfo：别关掉地图上的气泡
 function select(r, o = {}) {
   const prev = selected;
+  // 列表里点的：先记下被点那一行在屏幕上的位置，上一条收起、这一条展开之后再把它挪回原位，免得列表跳来跳去
+  const anchor = o.keep && r && r.row && r.row.isConnected ? r.row : null, y0 = anchor ? anchor.getBoundingClientRect().top : 0;
   selected = r;
   PF.hoverM = null; unmark();
+  if (!o.keepInfo) closeInfo();
   if (prev && prev !== r) styleRoute(prev);
   if (r) {
     if (o.open && SH.state === 'peek') setSheet('half');
@@ -514,7 +518,11 @@ function select(r, o = {}) {
   markRows();
   updateSummary();
   updateGps();
-  if (r) { body.scrollTop = 0; if (o.fit && r.bounds) fitTo(r.bounds, 16); }
+  if (r) {
+    if (anchor) body.scrollTop += anchor.getBoundingClientRect().top - y0;
+    else revealRow(r);
+    if (o.fit && r.bounds) fitTo(r.bounds, 16);
+  }
   schedProfile();
   schedule3d();
 }
@@ -606,18 +614,20 @@ const EYE = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s
 const subText = r => !r.segs.length ? `仅航点 · ${r.wpts.length} 个` : `${fmtKm(r.dist)}${r.gain != null ? ` · 爬升 ${Math.round(r.gain)} m · 最高 ${Math.round(r.max)} m` : ' · 无海拔数据'}`;
 const filtered = () => { const q = $('#q').value.trim().toLowerCase(); return routes.filter(r => !q || r.name.toLowerCase().includes(q) || r.file.toLowerCase().includes(q)); };
 
+const detailEl = $('#detail'); // 先拿住它：列表重画时它所在的那一行会被清掉，之后 querySelector 就找不到了
 function rowEl(r) {
   const li = document.createElement('li');
   li.className = 'row' + (r.visible ? '' : ' off') + (r === selected ? ' sel' : '');
-  li.innerHTML = '<label class="dot"><input type="color" aria-label="更改颜色"></label><div class="meta"><div class="nm"></div><div class="sub"></div></div><label class="eye"><input type="checkbox" aria-label="显示或隐藏">' + EYE + '</label>';
-  const dot = $('.dot', li), clr = $('.dot input', li), vis = $('.eye input', li);
+  li.style.setProperty('--rc', r.color);
+  li.innerHTML = '<div class="rowhead"><label class="dot"><input type="color" aria-label="更改颜色"></label><div class="meta"><div class="nm"></div><div class="sub"></div></div><label class="eye"><input type="checkbox" aria-label="显示或隐藏">' + EYE + '</label></div><div class="slot"></div>';
+  const head = $('.rowhead', li), dot = $('.dot', head), clr = $('.dot input', head), vis = $('.eye input', head);
   dot.style.background = r.color; clr.value = r.color; vis.checked = r.visible;
-  $('.nm', li).textContent = r.name;
-  $('.sub', li).textContent = subText(r);
+  $('.nm', head).textContent = r.name;
+  $('.sub', head).textContent = subText(r);
   clr.addEventListener('input', e => setColor(r, e.target.value, false));
   clr.addEventListener('change', e => setColor(r, e.target.value, true));
   vis.addEventListener('change', e => setVisible(r, e.target.checked));
-  li.addEventListener('click', e => { if (!e.target.closest('label')) select(r, { open: true, fit: true }); });
+  head.addEventListener('click', e => { if (!e.target.closest('label')) select(r, { open: true, fit: true, keep: true }); });
   return li;
 }
 function renderList() {
@@ -628,13 +638,30 @@ function renderList() {
     gain: (a, b) => (b.gain || 0) - (a.gain || 0)
   }[S.sort] || ((a, b) => a.id - b.id);
   const ul = $('#list');
+  $('#detailHome').appendChild(detailEl); // 列表要重画了：先把详情卡片搬回原位，免得它跟着旧的那一行被清掉
   ul.textContent = '';
   filtered().sort(cmp).forEach(r => ul.appendChild((r.row = rowEl(r))));
+  placeDetail();
   $('#empty').hidden = routes.length > 0;
   $('#tools').hidden = routes.length === 0;
   updateSummary();
 }
-function markRows() { routes.forEach(r => { if (r.row) r.row.classList.toggle('sel', r === selected); }); }
+function markRows() {
+  routes.forEach(r => { if (r.row) r.row.classList.toggle('sel', r === selected); });
+  placeDetail();
+}
+// 选中的路线在列表里有行就把详情卡片放进那一行；被筛选掉了（列表里没有这一行）就放在列表最上面
+function placeDetail() {
+  const r = selected, host = r && r.row && r.row.isConnected ? $('.slot', r.row) : $('#detailHome');
+  if (detailEl.parentElement !== host) host.appendChild(detailEl);
+}
+// 把选中的那一行（展开后带着详情）滚到列表最上面，再闪一下边框，一眼就能看到它在哪
+function revealRow(r) {
+  const row = r.row;
+  if (!row || !row.isConnected) { body.scrollTop = 0; return; }
+  body.scrollTop = row.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+}
 function updateSummary() {
   const vis = routes.filter(r => r.visible);
   const km = vis.reduce((s, r) => s + r.dist, 0) / 1000;
@@ -655,6 +682,125 @@ function renderDetail() {
   $('#dHide').textContent = r.visible ? '隐藏' : '显示';
   $('#pfClear').hidden = true;
   $('#pfInfo').textContent = '';
+}
+
+/* ================= 点一下路线：气泡里显示这条线的信息，列表里同步突出显示 ================= */
+const INFO = { pop: null, pop3: null, last: null, cur: null };
+const fmtDate = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const tapTol = () => matchMedia('(pointer: coarse)').matches ? 16 : 8; // 点选的容差（像素）：手指比鼠标粗
+
+// 2D：用经纬度自己算「点离哪几条路线在容差以内」，重叠的路线能一次全找出来，不依赖 Leaflet 只返回最上面那条的命中检测
+function candidates2d(ll, tolPx) {
+  const cosL = Math.cos(ll.lat * RAD), mpp = 156543.03392804097 * cosL / 2 ** map.getZoom(), tol = tolPx * mpp;
+  const kx = 111320 * cosL, ky = 111320, dLat = tol / ky, dLng = tol / kx, out = [];
+  for (const r of routes) {
+    if (!r.visible || !r.bounds) continue;
+    const b = r.bounds;
+    if (ll.lat < b.getSouth() - dLat || ll.lat > b.getNorth() + dLat || ll.lng < b.getWest() - dLng || ll.lng > b.getEast() + dLng) continue;
+    let best = Infinity;
+    for (const seg of r.ll) {
+      for (let i = 1; i < seg.length; i++) {
+        const a = seg[i - 1], c = seg[i];
+        if ((a[0] < ll.lat - dLat && c[0] < ll.lat - dLat) || (a[0] > ll.lat + dLat && c[0] > ll.lat + dLat) || (a[1] < ll.lng - dLng && c[1] < ll.lng - dLng) || (a[1] > ll.lng + dLng && c[1] > ll.lng + dLng)) continue;
+        const ax = (a[1] - ll.lng) * kx, ay = (a[0] - ll.lat) * ky, dx = (c[1] - a[1]) * kx, dy = (c[0] - a[0]) * ky, l2 = dx * dx + dy * dy;
+        const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0, d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (d < best) best = d;
+      }
+    }
+    if (best <= tol) out.push({ r, d: best / mpp });
+  }
+  return out.sort((x, y) => x.d - y.d);
+}
+// 3D：先让 MapLibre 找出点附近画着哪些路线（框大一点，因为地形夸张时它的命中会偏几个像素），再按投影到屏幕上的距离精确排序
+function candidates3d(pt) {
+  const m = v3.map, tol = tapTol() + 6, ids = new Set();
+  try { for (const f of m.queryRenderedFeatures([[pt.x - tol - 10, pt.y - tol - 10], [pt.x + tol + 10, pt.y + tol + 10]], { layers: ['r-line'] })) ids.add(f.properties.id); } catch (e) { /* 忽略 */ }
+  if (!ids.size) { const r = pick3d(pt); return r ? [{ r, d: 0 }] : []; }
+  const out = [];
+  for (const r of routes) {
+    if (!r.visible || !ids.has(r.id)) continue;
+    let best = Infinity;
+    const n = r.ll.reduce((s, g) => s + g.length, 0), k = Math.max(1, Math.ceil(n / 3000));
+    for (const seg of r.ll) {
+      let prev = null;
+      for (let i = 0; i < seg.length; i += k) {
+        const s = m.project([seg[i][1], seg[i][0]]);
+        if (prev) { const d = dseg(pt, prev, s); if (d < best) best = d; }
+        prev = s;
+      }
+    }
+    if (best <= tol) out.push({ r, d: best });
+  }
+  return out.sort((x, y) => x.d - y.d);
+}
+
+// 气泡里的内容：名称、关键数据、日期和文件名；这里有好几条路线重叠时，下面再列出来，点名称就切换
+function infoNode(sel, cands) {
+  const el = document.createElement('div'), line = (cls, txt) => { const d = document.createElement('div'); d.className = cls; d.textContent = txt; return d; };
+  el.className = 'co';
+  const t = document.createElement('div'), dot = document.createElement('i'), nm = document.createElement('b');
+  t.className = 'co-t'; dot.style.background = sel.color; nm.textContent = sel.name;
+  t.append(dot, nm); el.append(t);
+  el.append(line('co-s', [fmtKm(sel.dist), sel.gain != null ? `爬升 ${Math.round(sel.gain)} m · 下降 ${Math.round(sel.loss)} m` : '无海拔数据'].join(' · ')));
+  const s2 = [sel.max != null ? `最高 ${Math.round(sel.max)} m · 最低 ${Math.round(sel.min)} m` : '', sel.dur ? `用时 ${fmtDur(sel.dur)}` : ''].filter(Boolean).join(' · ');
+  if (s2) el.append(line('co-s', s2));
+  const meta = [sel.t0 ? fmtDate(sel.t0) : '', sel.file].filter(Boolean).join(' · ');
+  if (meta) el.append(line('co-m', meta));
+  if (cands.length > 1) {
+    el.append(line('co-l', `这里有 ${cands.length} 条路线重叠，点名称切换：`));
+    const ul = document.createElement('ul');
+    ul.className = 'co-u';
+    for (const c of cands.slice(0, 8)) {
+      const li = document.createElement('li'), i = document.createElement('i'), sp = document.createElement('span'), em = document.createElement('em');
+      li.dataset.id = c.r.id; if (c.r === sel) li.className = 'on';
+      i.style.background = c.r.color; sp.textContent = c.r.name; em.textContent = fmtKm(c.r.dist);
+      li.append(i, sp, em); ul.append(li);
+    }
+    el.append(ul);
+  }
+  return el;
+}
+function closeInfo() {
+  INFO.cur = null;
+  if (INFO.pop) { map.closePopup(INFO.pop); INFO.pop = null; }
+  if (INFO.pop3) { INFO.pop3.remove(); INFO.pop3 = null; }
+}
+function showInfo(at, cands, sel) {
+  INFO.cur = { at, cands, sel };
+  const node = infoNode(sel, cands);
+  node.addEventListener('click', e => { // 点气泡里列出的某一条：切换选中，气泡内容跟着换
+    e.stopPropagation(); // 换内容时旧的节点会被摘掉，不拦住的话 Leaflet 认不出这次点击发生在气泡里，会当成点了地图（→ 取消选中、气泡关闭）
+    const li = e.target.closest('li[data-id]');
+    const r = li && routes.find(x => String(x.id) === li.dataset.id);
+    if (r && r !== selected) { select(r, { keepInfo: true }); if (INFO.last) INFO.last.sel = r; showInfo(at, cands, r); }
+  });
+  if (v3.on) {
+    if (!INFO.pop3) INFO.pop3 = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '300px', offset: 12, className: 'info-pop' });
+    INFO.pop3.setLngLat(at.lngLat).setDOMContent(node);
+    if (!INFO.pop3.isOpen()) INFO.pop3.addTo(v3.map);
+    return;
+  }
+  const m = mapInsets();
+  if (!INFO.pop) INFO.pop = L.popup({ className: 'info-pop', closeButton: false, closeOnClick: false, autoClose: false, maxWidth: 300, minWidth: 220, offset: [0, -2] });
+  INFO.pop.options.autoPanPaddingTopLeft = L.point(m.left + 12, m.top + 10);
+  INFO.pop.options.autoPanPaddingBottomRight = L.point(m.right + 8, m.bottom + 12);
+  INFO.pop.setLatLng(at.ll).setContent(node);
+  if (!map.hasLayer(INFO.pop)) map.openPopup(INFO.pop);
+}
+// 地图上点了一下：cands 是容差内的路线（已按距离排好）。点在空白处 → 取消选中；点到了 → 选最近的那条、展开抽屉、列表里突出显示、气泡显示信息
+function tapRoutes(at, pt, cands) {
+  if (!cands.length) { INFO.last = null; if (selected) select(null); else closeInfo(); return; }
+  let sel = cands[0].r;
+  const last = INFO.last;
+  if (last && last.sel === selected && cands.length > 1 && cands.some(c => c.r === selected)) { // 在同一个位置再点一次：切到下一条重叠的路线（位置按地理坐标比，地图被挪动过也认得出来）
+    const p = last.at.ll ? map.latLngToContainerPoint(last.at.ll) : v3.map.project(last.at.lngLat);
+    if (Math.hypot(pt.x - p.x, pt.y - p.y) < 14) sel = cands[(cands.findIndex(c => c.r === selected) + 1) % cands.length].r;
+  }
+  select(sel, { open: true });
+  INFO.last = { at, sel };
+  const ll = at.ll ? [at.ll.lat, at.ll.lng] : [at.lngLat.lat, at.lngLat.lng];
+  ensureVisible(ll); // 抽屉展开后会盖住地图下半部分，把被点的位置挪到还看得见的区域里
+  showInfo(at, cands, sel);
 }
 
 /* ================= 海拔剖面（拖动手指看每一点的海拔和坡度） ================= */
@@ -991,6 +1137,222 @@ $('#btnResetBase').onclick = async () => {
   await initPack();
 };
 
+/* ================= 在地图上画线 → 生成新路线 → 导出 GPX ================= */
+// 操作：点一下加一个点；手指在地图上划一笔就画出一段（松手后自动简化）；已有的点可以拖动调整；
+// 画完点「完成」：沿线每约 30 米取一个点，海拔从离线地形数据里取，生成一条新路线（和导入的一样存在手机里），再问要不要导出 GPX
+const DR = { on: false, pts: [], halo: null, line: null, prev: null, markers: [], pan: false, stroke: null, ele: null, tok: 0, timer: 0 };
+const mapBox = map.getContainer();
+
+// 沿折线每隔 step 米插一个点（线太长时放宽，最多约 6000 个点）
+function densify(pts, step) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += hav(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+  step = Math.max(step, total / 6000);
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.round(hav(a[0], a[1], b[0], b[1]) / step));
+    for (let k = 1; k <= n; k++) { const t = k / n; out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+  }
+  return out;
+}
+// 从离线高程里给一串 [纬, 经] 取海拔（双线性插值）；高程数据没准备好返回 null
+async function sampleElev(points) {
+  if (dm.state !== 'ready' || !dm.dem) return null;
+  const dem = dm.dem, z = Math.min(dem.max, 12), n = 2 ** z * 256;
+  const fx = lng => (lng + 180) / 360 * n - 0.5, fy = lat => { const s = Math.sin(lat * RAD); return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n - 0.5; };
+  const need = new Set();
+  for (const [la, lo] of points) { const x = Math.floor(fx(lo)), y = Math.floor(fy(la)); for (const dx of [0, 1]) for (const dy of [0, 1]) need.add(((x + dx) >> 8) + '/' + ((y + dy) >> 8)); }
+  const tiles = new Map();
+  await Promise.all([...need].map(async k => { const [tx, ty] = k.split('/').map(Number); tiles.set(k, await dem.tile(z, tx, ty)); }));
+  const val = (ix, iy) => { const t = tiles.get((ix >> 8) + '/' + (iy >> 8)); return t ? t[(iy & 255) * 256 + (ix & 255)] : NaN; };
+  return points.map(([la, lo]) => {
+    const x = fx(lo), y = fy(la), x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0;
+    return (val(x0, y0) * (1 - tx) + val(x0 + 1, y0) * tx) * (1 - ty) + (val(x0, y0 + 1) * (1 - tx) + val(x0 + 1, y0 + 1) * tx) * ty;
+  });
+}
+const r6 = v => Math.round(v * 1e6) / 1e6; // 6 位小数 ≈ 11 厘米，导出的 GPX 不会拖一长串小数
+const toSeg = (dense, ele) => dense.map((p, i) => [r6(p[0]), r6(p[1]), ele && Number.isFinite(ele[i]) ? Math.round(ele[i] * 10) / 10 : null, null]);
+
+// Douglas–Peucker 抽稀（屏幕像素坐标），把手划出来的密密麻麻的点收成几十个
+function rdp(p, tol) {
+  if (p.length < 3) return p;
+  const dist = (q, a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy; if (!l2) return Math.hypot(q.x - a.x, q.y - a.y); const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)); return Math.hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy)); };
+  const keep = new Uint8Array(p.length), st = [[0, p.length - 1]];
+  keep[0] = keep[p.length - 1] = 1;
+  while (st.length) {
+    const [a, b] = st.pop();
+    let md = 0, mi = -1;
+    for (let i = a + 1; i < b; i++) { const d = dist(p[i], p[a], p[b]); if (d > md) { md = d; mi = i; } }
+    if (md > tol && mi >= 0) { keep[mi] = 1; st.push([a, mi], [mi, b]); }
+  }
+  return p.filter((_, i) => keep[i]);
+}
+
+async function startDraw() {
+  if (DR.on) return;
+  if (v3.on) await set3d(false); // 画线只在 2D 地图上
+  select(null); closeInfo();
+  DR.on = true; DR.pts = []; DR.pan = false; DR.ele = null;
+  document.body.classList.add('drawing');
+  $('#drawbar').hidden = false;
+  $('#btnDraw').classList.add('on');
+  $('#drPan').classList.remove('on'); $('#drPan').textContent = '移动地图';
+  DR.halo = L.polyline([], { renderer, color: '#ffffff', weight: S.lineW + 5, opacity: 0.9, interactive: false }).addTo(map);
+  DR.line = L.polyline([], { renderer, color: '#d81b60', weight: S.lineW + 1, dashArray: '9 7', interactive: false }).addTo(map);
+  DR.prev = L.polyline([], { renderer, color: '#d81b60', weight: S.lineW + 1, interactive: false });
+  map.dragging.disable(); // 一根手指拖动 = 画线；要移动地图就点「移动地图」，捏合缩放照常可用
+  drUpdate(true);
+}
+function stopDraw() {
+  if (!DR.on) return;
+  DR.on = false;
+  clearTimeout(DR.timer); DR.tok++;
+  DR.markers.forEach(m => map.removeLayer(m)); DR.markers = [];
+  [DR.halo, DR.line, DR.prev].forEach(l => { if (l && map.hasLayer(l)) map.removeLayer(l); });
+  DR.halo = DR.line = DR.prev = null; DR.stroke = null; DR.pts = [];
+  map.dragging.enable();
+  document.body.classList.remove('drawing');
+  $('#drawbar').hidden = true;
+  $('#btnDraw').classList.remove('on');
+}
+function drCancel() {
+  if (DR.pts.length >= 2 && !confirm('放弃这条还没保存的线？')) return;
+  stopDraw();
+}
+function drTogglePan() {
+  DR.pan = !DR.pan;
+  DR.stroke = null;
+  DR.pan ? map.dragging.enable() : map.dragging.disable();
+  $('#drPan').classList.toggle('on', DR.pan);
+  $('#drPan').textContent = DR.pan ? '继续画线' : '移动地图';
+  drInfoText();
+}
+function drUpdate(rebuild) {
+  DR.line.setLatLngs(DR.pts); DR.halo.setLatLngs(DR.pts);
+  if (rebuild) drMarkers();
+  drInfoText();
+  clearTimeout(DR.timer);
+  DR.timer = setTimeout(drElev, 350); // 手停下来再算海拔，免得每加一个点都算
+}
+function drMarkers() { // 每个点一个可以拖动的圆点；起点绿色、终点白色
+  DR.markers.forEach(m => map.removeLayer(m)); DR.markers = [];
+  DR.pts.forEach((ll, i) => {
+    const cls = i === 0 ? 'dv start' : i === DR.pts.length - 1 ? 'dv end' : 'dv';
+    const m = L.marker(ll, { draggable: true, keyboard: false, zIndexOffset: 600, icon: L.divIcon({ className: 'dvw', html: `<i class="${cls}"></i>`, iconSize: [26, 26], iconAnchor: [13, 13] }) });
+    m.on('drag', () => { DR.pts[i] = m.getLatLng(); DR.line.setLatLngs(DR.pts); DR.halo.setLatLngs(DR.pts); });
+    m.on('dragend', () => drUpdate(false));
+    m.addTo(map); DR.markers.push(m);
+  });
+}
+function drInfoText() {
+  let d = 0;
+  for (let i = 1; i < DR.pts.length; i++) d += hav(DR.pts[i - 1].lat, DR.pts[i - 1].lng, DR.pts[i].lat, DR.pts[i].lng);
+  const el = DR.ele && DR.ele.gain != null ? ` · 爬升约 ${Math.round(DR.ele.gain)} m` : '';
+  $('#drInfo').textContent = DR.pan ? '移动地图中：点「继续画线」回来继续画' : DR.pts.length ? `${DR.pts.length} 个点 · ${fmtKm(d)}${el}` : '点地图加点，或直接用手指划线';
+}
+async function drElev() { // 沿线取海拔，估算爬升
+  const tok = ++DR.tok;
+  if (DR.pts.length < 2 || dm.state !== 'ready') { DR.ele = null; return drInfoText(); }
+  try {
+    const dense = densify(DR.pts.map(p => [p.lat, p.lng]), 30), ele = await sampleElev(dense);
+    if (tok !== DR.tok || !DR.on) return;
+    const r = { segs: [pack(toSeg(dense, ele))] };
+    analyze(r);
+    DR.ele = r.gain == null ? null : { gain: r.gain, loss: r.loss };
+  } catch (e) { DR.ele = null; }
+  drInfoText();
+}
+// 加点：太近的（手抖）不要
+function drAppend(lls) {
+  for (const ll of lls) {
+    const last = DR.pts[DR.pts.length - 1];
+    if (last && map.latLngToContainerPoint(last).distanceTo(map.latLngToContainerPoint(ll)) < 4) continue;
+    DR.pts.push(L.latLng(ll.lat, ll.lng));
+  }
+  drUpdate(true);
+}
+// 手指输入：点一下 = 加一个点；拖动超过 8 像素 = 划一笔（松手后抽稀再加进去）；第二根手指落下 = 在捏合，放弃这一笔
+mapBox.addEventListener('pointerdown', e => {
+  if (!DR.on || DR.pan || e.target.closest('.dvw, .leaflet-control, .leaflet-popup')) return;
+  if (!e.isPrimary) { if (DR.stroke) { DR.stroke = null; if (map.hasLayer(DR.prev)) map.removeLayer(DR.prev); } return; }
+  DR.stroke = { x0: e.clientX, y0: e.clientY, id: e.pointerId, moved: false, pts: [] };
+});
+mapBox.addEventListener('pointermove', e => {
+  const s = DR.stroke;
+  if (!s || e.pointerId !== s.id) return;
+  const rc = mapBox.getBoundingClientRect(), x = e.clientX - rc.left, y = e.clientY - rc.top;
+  if (!s.moved) {
+    if (Math.hypot(e.clientX - s.x0, e.clientY - s.y0) < 8) return;
+    s.moved = true; s.pts.push({ x: s.x0 - rc.left, y: s.y0 - rc.top });
+    DR.prev.setLatLngs([map.containerPointToLatLng([s.pts[0].x, s.pts[0].y])]);
+    if (!map.hasLayer(DR.prev)) DR.prev.addTo(map);
+  }
+  const last = s.pts[s.pts.length - 1];
+  if (Math.hypot(x - last.x, y - last.y) >= 5) { s.pts.push({ x, y }); DR.prev.addLatLng(map.containerPointToLatLng([x, y])); }
+});
+const drEnd = e => {
+  const s = DR.stroke;
+  if (!s || e.pointerId !== s.id) return;
+  DR.stroke = null;
+  if (map.hasLayer(DR.prev)) map.removeLayer(DR.prev);
+  if (e.type === 'pointercancel') return;
+  const rc = mapBox.getBoundingClientRect();
+  if (!s.moved) { drAppend([map.containerPointToLatLng([e.clientX - rc.left, e.clientY - rc.top])]); return; }
+  drAppend(rdp(s.pts, 3).map(p => map.containerPointToLatLng([p.x, p.y])));
+};
+mapBox.addEventListener('pointerup', drEnd);
+mapBox.addEventListener('pointercancel', drEnd);
+
+async function finishDraw() {
+  if (DR.pts.length < 2) return toast('至少要有两个点才能生成路线');
+  $('#drDone').disabled = true;
+  try {
+    const dense = densify(DR.pts.map(p => [p.lat, p.lng]), 30), ele = await sampleElev(dense);
+    const def = `手绘路线 ${routes.filter(r => r.file === '手绘').length + 1}`;
+    const ans = prompt('给这条新路线起个名字：', def);
+    if (ans === null) return; // 取消：留在画线模式里继续改
+    const name = ans.trim() || def, segs = [pack(toSeg(dense, ele))];
+    const rec = { key: `draw:${Date.now()}`, file: '手绘', name, color: colorAt(S.colorSeq++), visible: true, added: Date.now(), wpts: [] };
+    let id;
+    try { id = DB.ok ? await DB.add(rec, segs) : -(routes.length + 1); } catch (e) { DB.ok = false; id = -(routes.length + 1); toast('这台设备不让保存数据（' + e.message + '），路线只在本次打开期间有效', 8000); }
+    rec.id = id;
+    const r = addRoute(rec, segs);
+    saveS();
+    stopDraw();
+    renderList();
+    select(r, { open: true, fit: true });
+    toast(`已生成「${name}」${fmtKm(r.dist)}${r.gain != null ? `，爬升约 ${Math.round(r.gain)} m` : '（没有海拔数据）'}。点「导出」下载 GPX`, 7000);
+  } finally { $('#drDone').disabled = false; }
+}
+
+// 导出成 GPX 1.1：轨迹点带海拔（有时间也带时间），航点一并带上
+function gpxOf(r) {
+  const x = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>', '<gpx version="1.1" creator="亚美尼亚徒步轨迹" xmlns="http://www.topografix.com/GPX/1/1">', `<metadata><name>${x(r.name)}</name></metadata>`];
+  for (const w of r.wpts) out.push(`<wpt lat="${w.lat}" lon="${w.lng}">${w.ele != null ? `<ele>${w.ele}</ele>` : ''}<name>${x(w.name || '')}</name></wpt>`);
+  out.push(`<trk><name>${x(r.name)}</name>`);
+  for (const a of r.segs) {
+    out.push('<trkseg>');
+    for (let i = 0; i < a.length; i += 4) out.push(`<trkpt lat="${a[i]}" lon="${a[i + 1]}">${a[i + 2] === a[i + 2] ? `<ele>${a[i + 2]}</ele>` : ''}${a[i + 3] === a[i + 3] ? `<time>${new Date(a[i + 3]).toISOString()}</time>` : ''}</trkpt>`);
+    out.push('</trkseg>');
+  }
+  out.push('</trk>', '</gpx>');
+  return out.join('\n');
+}
+async function exportRoute(r) {
+  const fname = (r.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().slice(0, 60) || '路线') + '.gpx';
+  const text = gpxOf(r);
+  for (const type of ['application/gpx+xml', 'application/xml', 'text/xml', 'text/plain']) { // 分享面板对文件类型有白名单，挑第一个被接受的
+    const file = new File([text], fname, { type });
+    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: fname }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); // 不支持分享：走普通下载
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/gpx+xml' })); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast(`已下载 ${fname}`);
+}
+
 /* ================= 屏幕常亮 ================= */
 let wakeLock = null;
 async function setWake(on) {
@@ -1212,8 +1574,7 @@ function init3d() {
     const w = S.wpts ? pickWpt3d(e.point) : null;
     if (w) { v3.popup.setLngLat([w.lng, w.lat]).setDOMContent(textDom(w.name || '航点', w.ele != null ? `${Math.round(w.ele)} m` : '')).addTo(m); return; }
     v3.popup.remove();
-    const r = pick3d(e.point);
-    if (r) select(r, { open: true }); else if (selected) select(null);
+    tapRoutes({ lngLat: e.lngLat }, e.point, candidates3d(e.point));
   });
   m.on('load', () => {
     v3.ready = true; sync3d(); syncGps3d();
@@ -1224,6 +1585,7 @@ function init3d() {
 }
 async function set3d(on) {
   if (on === v3.on) return;
+  if (on && DR.on) return toast('画线的时候不能进 3D：先点「完成」或退出画线', 4000);
   const btn = $('#btn3d');
   if (on) {
     if (dm.state !== 'ready') return toast(dm.state === 'loading' ? '地形数据还在下载，下载完才能用 3D' : '地形数据没准备好：' + dm.err, 7000);
@@ -1234,6 +1596,8 @@ async function set3d(on) {
     if (v3.map && v3.flavor !== flavor3d()) { v3.map.remove(); v3.map = null; v3.ready = false; v3.sig = ''; v3.dot = null; } // 系统深浅色变了：重建
   }
   unmark();
+  closeInfo();
+  INFO.last = null;
   v3.on = on;
   document.body.classList.toggle('mode3d', on);
   btn.classList.toggle('on', on);
@@ -1254,6 +1618,13 @@ $('#btnLocate').onclick = toggleLocate;
 $('#btnFit').onclick = () => { const b = allBounds(); if (b) fitTo(b); else toast('还没有路线'); };
 $('#btnSettings').onclick = openSettings;
 $('#btn3d').onclick = () => set3d(!v3.on);
+$('#btnDraw').onclick = () => (DR.on ? drCancel() : startDraw());
+$('#dExport').onclick = () => { if (selected) exportRoute(selected); };
+$('#drUndo').onclick = () => { DR.pts.pop(); drUpdate(true); };
+$('#drClear').onclick = () => { if (DR.pts.length > 2 && !confirm('清除已经画的线？')) return; DR.pts = []; DR.ele = null; drUpdate(true); };
+$('#drPan').onclick = drTogglePan;
+$('#drDone').onclick = finishDraw;
+$('#drCancel').onclick = drCancel;
 $('#dClose').onclick = () => select(null);
 $('#dFit').onclick = () => { if (selected && selected.bounds) fitTo(selected.bounds, 16); };
 $('#dHide').onclick = () => { if (selected) setVisible(selected, !selected.visible); };
@@ -1265,7 +1636,7 @@ $('#sort').value = S.sort;
 $('#sort').onchange = e => { S.sort = e.target.value; saveS(); renderList(); };
 $('#btnAll').onclick = () => { const rs = filtered(); rs.forEach(r => setVisible(r, true, true)); updateSummary(); saveMeta(rs); };
 $('#btnNone').onclick = () => { const rs = filtered(); rs.forEach(r => setVisible(r, false, true)); updateSummary(); saveMeta(rs); };
-map.on('click', () => { if (selected) select(null); });
+map.on('click', e => { if (!DR.on) tapRoutes({ ll: e.latlng }, e.containerPoint, candidates2d(e.latlng, tapTol())); });
 addEventListener('resize', () => { layoutSheet(false); map.invalidateSize(); if (v3.map) v3.map.resize(); schedProfile(); });
 addEventListener('orientationchange', () => setTimeout(() => { layoutSheet(false); map.invalidateSize(); if (v3.map) v3.map.resize(); }, 300));
 
@@ -1302,6 +1673,6 @@ async function loadSaved() {
   if (routes.length) fitAll();
   refreshSettings();
 }
-if (location.hash === '#debug') window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, select, set3d }; // 测试用：地址后面加 #debug 才暴露
+if (location.hash === '#debug') window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, INFO, select, set3d, candidates2d, candidates3d, tapRoutes, DR, startDraw, exportRoute, gpxOf }; // 测试用：地址后面加 #debug 才暴露
 boot();
 })();

@@ -69,13 +69,14 @@ function encodeTerrarium(e) {
   return concat([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', z), chunk('IEND', new Uint8Array(0))]);
 }
 
-// 从上级瓦片 src（256×256）里裁出下面第 k 级、位置 (ox, oy) 的那一块，双线性放大回 256×256
+// 从上级瓦片 src（256×256）里裁出下面第 k 级、位置 (ox, oy) 的那一块，双线性放大回 256×256。
+// 瓦片最外面半个像素不夹在边上，而是顺着最后两个像素的坡度外推：夹住的话相邻两块的边缘会各自"平"半个像素再突然跳一级，山体阴影上就是一条细线
 function crop(src, k, ox, oy) {
   const n = 2 ** k, out = new Float32Array(TS * TS);
   for (let j = 0; j < TS; j++) {
-    const sy = (oy * TS + j + 0.5) / n - 0.5, y0 = Math.max(0, Math.min(TS - 2, Math.floor(sy))), fy = Math.max(0, Math.min(1, sy - y0));
+    const sy = (oy * TS + j + 0.5) / n - 0.5, y0 = Math.max(0, Math.min(TS - 2, Math.floor(sy))), fy = sy - y0;
     for (let i = 0; i < TS; i++) {
-      const sx = (ox * TS + i + 0.5) / n - 0.5, x0 = Math.max(0, Math.min(TS - 2, Math.floor(sx))), fx = Math.max(0, Math.min(1, sx - x0));
+      const sx = (ox * TS + i + 0.5) / n - 0.5, x0 = Math.max(0, Math.min(TS - 2, Math.floor(sx))), fx = sx - x0;
       const p = y0 * TS + x0;
       out[j * TS + i] = (src[p] * (1 - fx) + src[p + 1] * fx) * (1 - fy) + (src[p + TS] * (1 - fx) + src[p + TS + 1] * fx) * fy;
     }

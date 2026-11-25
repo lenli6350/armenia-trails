@@ -38,6 +38,9 @@
     <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
   </button>
   <button type="button" id="btn3d" class="txt" aria-label="3D 视图">3D</button>
+  <button type="button" id="btnDraw" aria-label="画线生成新路线">
+    <svg viewBox="0 0 24 24"><path d="M4 20l4.5-1 11-11a2.1 2.1 0 0 0-3-3l-11 11z"/><path d="M14.5 6.5l3 3"/></svg>
+  </button>
   <button type="button" id="btnSettings" aria-label="设置">
     <svg viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.4"/><circle cx="8" cy="17" r="2.4"/></svg>
   </button>
@@ -52,19 +55,22 @@
     </div>
   </div>
   <div id="body">
-    <div id="detail" hidden>
-      <div class="dt">
-        <label class="dot" title="更改颜色"><input type="color" id="dColor" aria-label="更改颜色"></label>
-        <div class="dn" id="dName"></div>
-        <button type="button" class="x" id="dClose" aria-label="取消选中">×</button>
-      </div>
-      <div class="ds" id="dStats"></div>
-      <div id="pfWrap"><canvas id="pfCanvas"></canvas><div id="pfNone" hidden>这条路线没有海拔数据</div></div>
-      <div class="pi"><span id="pfInfo"></span><button type="button" id="pfClear" hidden>清除标记</button></div>
-      <div class="da">
-        <button type="button" id="dFit">适应屏幕</button>
-        <button type="button" id="dHide">隐藏</button>
-        <button type="button" id="dDel" class="danger">删除</button>
+    <div id="detailHome">
+      <div id="detail" hidden>
+        <div class="dt">
+          <label class="dot" title="更改颜色"><input type="color" id="dColor" aria-label="更改颜色"></label>
+          <div class="dn" id="dName"></div>
+          <button type="button" class="x" id="dClose" aria-label="取消选中">×</button>
+        </div>
+        <div class="ds" id="dStats"></div>
+        <div id="pfWrap"><canvas id="pfCanvas"></canvas><div id="pfNone" hidden>这条路线没有海拔数据</div></div>
+        <div class="pi"><span id="pfInfo"></span><button type="button" id="pfClear" hidden>清除标记</button></div>
+        <div class="da">
+          <button type="button" id="dFit">适应屏幕</button>
+          <button type="button" id="dHide">隐藏</button>
+          <button type="button" id="dExport">导出</button>
+          <button type="button" id="dDel" class="danger">删除</button>
+        </div>
       </div>
     </div>
     <div id="empty" hidden>
@@ -116,6 +122,16 @@
       <h3>关于</h3>
       <div class="note" id="about"></div>
     </div>
+  </div>
+</div>
+
+<div id="drawbar" hidden>
+  <div class="dr-t"><span id="drInfo"></span><button type="button" class="x" id="drCancel" aria-label="退出画线">×</button></div>
+  <div class="dr-b">
+    <button type="button" id="drUndo">撤销</button>
+    <button type="button" id="drClear">清除</button>
+    <button type="button" id="drPan">移动地图</button>
+    <button type="button" id="drDone" class="primary">完成</button>
   </div>
 </div>
 

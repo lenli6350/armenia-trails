@@ -92,8 +92,14 @@ body.mode3d #map { visibility: hidden; }
 #tools button { flex: none; padding: 0 9px; font-size: 13px; }
 
 #list { list-style: none; margin: 0; padding: 0; }
-.row { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
-.row.sel { background: var(--sel); }
+.row { display: block; border-bottom: 1px solid var(--line); }
+.rowhead { display: flex; align-items: center; gap: 12px; padding: 8px 14px; cursor: pointer; }
+/* 选中的那一行：整行高亮、左边一道路线颜色的粗条，原来的行头收起来，展开成详情卡片；刚选中时边框闪一下 */
+.row.sel { background: var(--sel); box-shadow: inset 6px 0 0 var(--rc, var(--accent)); }
+.row.sel .rowhead { display: none; }
+.row.flash { animation: flash 1.3s ease-out; }
+@keyframes flash { 0%, 40% { outline: 3px solid var(--rc, var(--accent)); outline-offset: -3px; } 100% { outline: 3px solid transparent; outline-offset: -3px; } }
+.slot #detail { padding: 10px 14px 12px 20px; background: transparent; border-bottom: 0; }
 .row.off .nm, .row.off .sub { color: var(--muted); }
 .row .meta { flex: 1; min-width: 0; }
 .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -134,3 +140,42 @@ body.mode3d #map { visibility: hidden; }
   #stack { left: 424px; right: auto; max-width: min(380px, calc(100vw - 500px)); }
   #sheet { left: 12px; right: auto; width: 400px; bottom: 12px; border-radius: 18px; }
 }
+
+/* 点路线时弹出的信息气泡（2D 是 Leaflet 的 popup，3D 是 MapLibre 的 popup） */
+.info-pop .leaflet-popup-content-wrapper, .info-pop.maplibregl-popup .maplibregl-popup-content { background: var(--bg); color: var(--text); border-radius: 12px; box-shadow: var(--shadow); padding: 0; }
+.info-pop .leaflet-popup-tip { background: var(--bg); }
+.info-pop.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, .info-pop.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, .info-pop.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--bg); }
+.info-pop.maplibregl-popup-anchor-top .maplibregl-popup-tip, .info-pop.maplibregl-popup-anchor-top-left .maplibregl-popup-tip, .info-pop.maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--bg); }
+.info-pop .leaflet-popup-content { margin: 0; width: auto !important; }
+.co { padding: 10px 12px; min-width: 210px; max-width: 290px; font-size: 13px; line-height: 1.4; user-select: text; -webkit-user-select: text; }
+.co-t { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; }
+.co-t i, .co-u i { flex: none; width: 12px; height: 12px; margin-top: 3px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); box-sizing: content-box; }
+.co-t b { min-width: 0; overflow-wrap: anywhere; }
+.co-s { margin-top: 3px; }
+.co-m { margin-top: 3px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.co-l { margin: 8px 0 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.co-u { list-style: none; margin: 0; padding: 0; max-height: 156px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.co-u li { display: flex; align-items: center; gap: 8px; padding: 6px 6px; border-radius: 8px; cursor: pointer; }
+.co-u li i { margin-top: 0; }
+.co-u li.on { background: var(--sel); font-weight: 700; }
+.co-u li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-u li em { flex: none; font-style: normal; color: var(--muted); font-size: 12px; }
+
+/* 画线模式：隐藏底部抽屉，换成画线工具条；折线用洋红色虚线，端点可以拖动 */
+#drawbar { position: fixed; z-index: 540; left: 0; right: 0; bottom: 0; padding: 10px calc(var(--right) + 14px) calc(var(--bottom) + 12px) calc(var(--left) + 14px); background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: 0 -2px 14px rgba(0, 0, 0, .25); }
+.dr-t { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 14px; }
+.dr-t span { flex: 1; min-width: 0; }
+.dr-b { display: flex; gap: 8px; margin-top: 6px; }
+.dr-b button { flex: 1; min-width: 0; padding: 0 4px; white-space: nowrap; }
+@media (max-width: 360px) { .dr-b { gap: 6px; } .dr-b button { font-size: 13px; } }
+.dr-b button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+body.drawing #sheet { display: none; }
+body.drawing #toast { bottom: calc(124px + var(--bottom)) !important; }
+body.drawing .leaflet-container { cursor: crosshair; }
+.dvw { background: none; border: 0; }
+.dv { display: block; width: 18px; height: 18px; margin: 4px; border-radius: 50%; background: #d81b60; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); box-sizing: border-box; }
+.dv.start { width: 22px; height: 22px; margin: 2px; background: #2e7d32; }
+.dv.end { width: 22px; height: 22px; margin: 2px; background: #fff; border-color: #d81b60; }
+#detail .da { gap: 6px; }
+#detail .da button { padding: 0 4px; font-size: 14px; }
+@media (min-width: 700px) { #drawbar { left: 12px; right: auto; width: 400px; bottom: 12px; border-radius: 18px; } }
