@@ -19,8 +19,9 @@ if (typeof L === 'undefined' || typeof pmtiles === 'undefined' || typeof protoma
 }
 
 /* ================= 设置 ================= */
-const DEF = { base: 'auto', lineW: 4, ends: true, halo: true, wpts: false, sort: 'add', wake: false, colorSeq: 0, custom: null, hill: true, hillOp: 0.65, ex3d: 1.5, base3d: 'off', offDist: 30, alertOff: true };
+const DEF = { base: 'auto', lineW: 4, ends: true, halo: true, wpts: false, sort: 'add', wake: false, colorSeq: 0, custom: null, hill: true, hillOp: 0.65, ex3d: 1.5, base3d: 'off', offDist: 30, offAlert: false }; // offAlert：走偏时响声提醒，默认关。换了个新名字，免得之前版本存下来的"开着"带过来
 const S = Object.assign({}, DEF, (() => { try { return JSON.parse(localStorage.getItem('at-settings-v1')) || {}; } catch (e) { return {}; } })());
+delete S.alertOff; // 上一版里响声提醒的旧名字，已改成 offAlert（默认关），旧的不再用
 const saveS = () => { try { localStorage.setItem('at-settings-v1', JSON.stringify(S)); } catch (e) { /* 隐私模式等：忽略 */ } };
 
 /* ================= 小工具 ================= */
@@ -1024,7 +1025,7 @@ function clearGuide() {
   if (GPS.tdot) { map.removeLayer(GPS.tdot); GPS.tdot = null; }
 }
 function initAlertAudio() {
-  if (!S.alertOff || GPS.ac) return;
+  if (!S.offAlert || GPS.ac) return;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   try { GPS.ac = new AC(); GPS.ac.resume().catch(() => {}); } catch (e) { GPS.ac = null; }
@@ -1052,7 +1053,7 @@ function gpsAlert(kind, tg) {
     toast(`偏离路线了：离路线 ${fmtM(tg.n.off)}，往${dir8(tg.n.brg)}走回到路线`, 8000);
     box.classList.remove('alert'); void box.offsetWidth; box.classList.add('alert');
   } else toast('回到路线上了', 3000);
-  if (S.alertOff) gpsBeep(kind);
+  if (S.offAlert) gpsBeep(kind); // 状态条变红闪一下 + 弹提示是一直有的；响声 / 震动要在设置里打开
 }
 
 function updateGps(fresh) {
@@ -1252,7 +1253,7 @@ function buildBaseList() {
 async function refreshSettings() {
   $('#optWidth').value = S.lineW; $('#optWidthVal').textContent = S.lineW;
   $('#optEnds').checked = S.ends; $('#optHalo').checked = S.halo; $('#optWpts').checked = S.wpts; $('#optWake').checked = S.wake;
-  $('#optOff').value = S.offDist; $('#optOffVal').textContent = S.offDist + ' m'; $('#optAlert').checked = S.alertOff;
+  $('#optOff').value = S.offDist; $('#optOffVal').textContent = S.offDist + ' m'; $('#optAlert').checked = S.offAlert;
   $('#offNote').innerHTML = bm.state === 'ready'
     ? (S.custom ? `现在用的是你导入的离线地图：${esc(S.custom.name)}（${fmtMB(S.custom.size)}）。` : `已保存在本机（${fmtMB(bm.size)}）：${BASE.area}有街道级细节，亚美尼亚全境只到概略级别（大路、地名、河流）。数据是 Protomaps ${BASE.build} 的版本。`)
     : bm.state === 'loading' ? '正在准备…' : `没准备好：${esc(bm.err)}`;
@@ -1277,7 +1278,7 @@ $('#optHalo').onchange = e => { S.halo = e.target.checked; saveS(); routes.forEa
 $('#optWpts').onchange = e => { S.wpts = e.target.checked; saveS(); routes.forEach(sync); schedule3d(); };
 $('#optWake').onchange = e => { S.wake = e.target.checked; saveS(); setWake(S.wake); };
 $('#optOff').oninput = e => { S.offDist = +e.target.value; $('#optOffVal').textContent = S.offDist + ' m'; saveS(); updateGps(); };
-$('#optAlert').onchange = e => { S.alertOff = e.target.checked; saveS(); if (S.alertOff && GPS.id != null) initAlertAudio(); };
+$('#optAlert').onchange = e => { S.offAlert = e.target.checked; saveS(); if (S.offAlert && GPS.id != null) initAlertAudio(); };
 $('#base3dList').addEventListener('change', e => { if (e.target.name === 'base3d') { S.base3d = e.target.value; saveS(); apply3dBase(); } });
 $('#optHill').onchange = e => { S.hill = e.target.checked; saveS(); applyHill(); apply3dHill(); };
 $('#optHillOp').oninput = e => { S.hillOp = +e.target.value; $('#optHillOpVal').textContent = Math.round(S.hillOp * 100) + '%'; saveS(); if (dm.layer) dm.layer.setOpacity(S.hillOp); apply3dHill(); };
