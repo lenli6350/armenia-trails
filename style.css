@@ -161,6 +161,13 @@ body.mode3d #map { visibility: hidden; }
 .co-u li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .co-u li em { flex: none; font-style: normal; color: var(--muted); font-size: 12px; }
 
+/* 分享面板（和设置面板同一种底部卡片） */
+#shTitle { flex: 1; min-width: 0; margin-right: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shopt { margin-top: 14px; }
+.shopt button { width: 100%; min-height: 46px; }
+.shopt .note { margin-top: 6px; }
+#shInfo { margin-top: 10px; }
+
 /* 画线模式：隐藏底部抽屉，换成画线工具条；折线用洋红色虚线，端点可以拖动 */
 #drawbar { position: fixed; z-index: 540; left: 0; right: 0; bottom: 0; padding: 10px calc(var(--right) + 14px) calc(var(--bottom) + 12px) calc(var(--left) + 14px); background: var(--panel); border-radius: 18px 18px 0 0; box-shadow: 0 -2px 14px rgba(0, 0, 0, .25); }
 .dr-t { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 14px; }

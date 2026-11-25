@@ -1201,6 +1201,7 @@ async function startDraw() {
   DR.line = L.polyline([], { renderer, color: '#d81b60', weight: S.lineW + 1, dashArray: '9 7', interactive: false }).addTo(map);
   DR.prev = L.polyline([], { renderer, color: '#d81b60', weight: S.lineW + 1, interactive: false });
   map.dragging.disable(); // 一根手指拖动 = 画线；要移动地图就点「移动地图」，捏合缩放照常可用
+  map.doubleClickZoom.disable(); // 连点两下是在加两个点，别触发"双击放大"
   drUpdate(true);
 }
 function stopDraw() {
@@ -1210,7 +1211,7 @@ function stopDraw() {
   DR.markers.forEach(m => map.removeLayer(m)); DR.markers = [];
   [DR.halo, DR.line, DR.prev].forEach(l => { if (l && map.hasLayer(l)) map.removeLayer(l); });
   DR.halo = DR.line = DR.prev = null; DR.stroke = null; DR.pts = [];
-  map.dragging.enable();
+  map.dragging.enable(); map.doubleClickZoom.enable();
   document.body.classList.remove('drawing');
   $('#drawbar').hidden = true;
   $('#btnDraw').classList.remove('on');
@@ -1222,7 +1223,7 @@ function drCancel() {
 function drTogglePan() {
   DR.pan = !DR.pan;
   DR.stroke = null;
-  DR.pan ? map.dragging.enable() : map.dragging.disable();
+  for (const h of [map.dragging, map.doubleClickZoom]) DR.pan ? h.enable() : h.disable();
   $('#drPan').classList.toggle('on', DR.pan);
   $('#drPan').textContent = DR.pan ? '继续画线' : '移动地图';
   drInfoText();
@@ -1321,7 +1322,7 @@ async function finishDraw() {
     stopDraw();
     renderList();
     select(r, { open: true, fit: true });
-    toast(`已生成「${name}」${fmtKm(r.dist)}${r.gain != null ? `，爬升约 ${Math.round(r.gain)} m` : '（没有海拔数据）'}。点「导出」下载 GPX`, 7000);
+    toast(`已生成「${name}」${fmtKm(r.dist)}${r.gain != null ? `，爬升约 ${Math.round(r.gain)} m` : '（没有海拔数据）'}。点「分享」可以发给别人`, 7000);
   } finally { $('#drDone').disabled = false; }
 }
 
@@ -1351,6 +1352,169 @@ async function exportRoute(r) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
   toast(`已下载 ${fname}`);
+}
+
+/* ================= 分享：GPX 文件 / 链接 ================= */
+// 链接里装的就是路线本身（不经过任何服务器，# 后面的内容浏览器也不会发给网站）：
+// 先抽稀到最多 300 个点，每个点取到 1e-5 度（约 1 米）、海拔取整米，相邻点做差 → 变长整数 → deflate 压缩 → base64url
+const SHARE_MAX_PTS = 300, SHARE_MAX_SEGS = 20, SHARE_ABS_MAX = 5000;
+const b64u = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode(...u8.subarray(i, i + 8192)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const zig = n => ((n << 1) ^ (n >> 31)) >>> 0, unzig = u => (u >>> 1) ^ -(u & 1);
+function putVar(out, u) { u >>>= 0; while (u > 127) { out.push((u & 127) | 128); u >>>= 7; } out.push(u); }
+function getVar(b, o) {
+  let u = 0, s = 0, x;
+  do { x = b[o.i++]; if (x === undefined || s > 28) throw new Error('数据不完整'); u |= (x & 127) << s; s += 7; } while (x & 128);
+  return u >>> 0;
+}
+async function pipeBytes(bytes, stream, max) { // 读完整个流；超过 max 字节就停（防止恶意链接解压出一大坨）
+  const rd = new Blob([bytes]).stream().pipeThrough(stream).getReader(), parts = [];
+  let n = 0;
+  for (;;) { const { done, value } = await rd.read(); if (done) break; n += value.length; if (n > max) { rd.cancel(); throw new Error('数据太大'); } parts.push(value); }
+  const out = new Uint8Array(n); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+// 路线 → 字符串。r.segs 里每段是 [纬, 经, 海拔|NaN, 时间|NaN] 四个一组的 Float64Array；返回 base64url
+async function shareEncode(r) {
+  if (r.segs.length > SHARE_MAX_SEGS) throw new Error('这条路线由太多段组成');
+  const segs = r.segs.map(a => { const o = []; for (let i = 0; i < a.length; i += 4) o.push({ lat: a[i], lon: a[i + 1], ele: a[i + 2] }); return o; }).filter(s => s.length > 1);
+  if (!segs.length) throw new Error('这条路线没有轨迹点');
+  let total = 0; for (const s of segs) total += s.length;
+  let keep = segs;
+  if (total > SHARE_MAX_PTS) { // 逐步放宽抽稀的距离（米），直到点数够少
+    const k0 = Math.cos(segs[0][0].lat * RAD) * 111320, k1 = 111320;
+    for (let tol = 4; ; tol *= 1.5) {
+      keep = segs.map(s => rdp(s.map(p => ({ x: p.lon * k0, y: p.lat * k1, p })), tol).map(q => q.p));
+      let n = 0; for (const s of keep) n += s.length;
+      if (n <= SHARE_MAX_PTS || tol > 5000) break;
+    }
+  }
+  const hasEle = keep.every(s => s.every(p => Number.isFinite(p.ele)));
+  const q = v => Math.round(v * 1e5);
+  const nameB = new TextEncoder().encode(Array.from(r.name.replace(/[\u0000-\u001f]/g, ' ').trim()).slice(0, 60).join('')); // 最多 60 个字
+  const inner = [(1 << 4) | (hasEle ? 1 : 0)];
+  putVar(inner, nameB.length); for (const c of nameB) inner.push(c);
+  putVar(inner, keep.length);
+  for (const s of keep) {
+    putVar(inner, s.length);
+    let pa = 0, po = 0, pe = 0;
+    s.forEach((p, i) => {
+      const a = q(p.lat), o = q(p.lon), e = hasEle ? Math.round(p.ele) : 0;
+      putVar(inner, zig(i ? a - pa : a)); putVar(inner, zig(i ? o - po : o)); if (hasEle) putVar(inner, zig(i ? e - pe : e));
+      pa = a; po = o; pe = e;
+    });
+  }
+  const raw = Uint8Array.from(inner);
+  let body = null;
+  if (typeof CompressionStream !== 'undefined') { try { body = await pipeBytes(raw, new CompressionStream('deflate-raw'), 1 << 20); } catch (e) { body = null; } }
+  const out = new Uint8Array((body || raw).length + 1);
+  out[0] = body ? 1 : 0; out.set(body || raw, 1);
+  return b64u(out);
+}
+// 字符串 → { name, segs: [Float64Array…], hasEle }；任何不对劲的地方都抛出带中文说明的错误
+async function shareDecode(str) {
+  if (!/^[A-Za-z0-9_-]{8,40000}$/.test(str)) throw new Error('链接不完整（可能复制的时候被截断了）');
+  let bytes;
+  try { bytes = unb64u(str); } catch (e) { throw new Error('链接不完整（可能复制的时候被截断了）'); }
+  let inner;
+  if (bytes[0] === 1) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('这个系统版本太旧，打不开');
+    try { inner = await pipeBytes(bytes.subarray(1), new DecompressionStream('deflate-raw'), 400000); } catch (e) { throw new Error(e.message === '数据太大' ? e.message : '链接不完整（可能复制的时候被截断了）'); }
+  } else if (bytes[0] === 0) inner = bytes.subarray(1);
+  else throw new Error('链接不是这个版本的 App 生成的');
+  const o = { i: 0 }, flags = inner[o.i++];
+  if ((flags >> 4) !== 1) throw new Error('链接不是这个版本的 App 生成的');
+  const hasEle = !!(flags & 1);
+  const nl = getVar(inner, o);
+  if (nl > 400 || o.i + nl > inner.length) throw new Error('链接内容不对');
+  const name = new TextDecoder('utf-8').decode(inner.subarray(o.i, o.i + nl)).replace(/[\u0000-\u001f�]/g, ' ').trim().slice(0, 80); o.i += nl;
+  const ns = getVar(inner, o);
+  if (!ns || ns > SHARE_MAX_SEGS) throw new Error('链接内容不对');
+  const segs = []; let total = 0;
+  for (let s = 0; s < ns; s++) {
+    const n = getVar(inner, o);
+    total += n;
+    if (n < 2 || total > SHARE_ABS_MAX) throw new Error('链接内容不对');
+    const a = new Float64Array(n * 4);
+    let pa = 0, po = 0, pe = 0;
+    for (let i = 0; i < n; i++) {
+      pa += unzig(getVar(inner, o)); po += unzig(getVar(inner, o)); if (hasEle) pe += unzig(getVar(inner, o));
+      const lat = pa / 1e5, lon = po / 1e5;
+      if (!okLL([lat, lon])) throw new Error('链接内容不对');
+      if (hasEle && (pe < -500 || pe > 9000)) throw new Error('链接内容不对');
+      a[4 * i] = lat; a[4 * i + 1] = lon; a[4 * i + 2] = hasEle ? pe : NaN; a[4 * i + 3] = NaN;
+    }
+    segs.push(a);
+  }
+  return { name: name || '分享的路线', segs, hasEle };
+}
+const hash32 = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16); };
+const shareUrlOf = payload => location.origin + location.pathname + '#s=' + payload;
+
+// 收到分享：text 可以是整条链接，也可以只是 #s= 后面那一串
+async function openShared(text) {
+  const m = /(?:^|[#&?])s=([A-Za-z0-9_-]+)/.exec(String(text).trim()) || (/^[A-Za-z0-9_-]{20,}$/.test(String(text).trim()) ? [null, String(text).trim()] : null);
+  if (!m) return toast('这不是分享链接：链接里应该有「#s=」，后面跟着一长串字母数字');
+  let d;
+  try { d = await shareDecode(m[1]); } catch (e) { return toast('这条分享链接打不开：' + e.message, 9000); }
+  const key = `share:${hash32(m[1])}:${m[1].length}`, have = routes.find(r => r.key === key);
+  if (have) { select(have, { open: true, fit: true }); return toast('这条路线已经在你的列表里了'); }
+  let pts = []; for (const a of d.segs) for (let i = 0; i < a.length; i += 4) pts.push([a[i], a[i + 1]]);
+  if (!d.hasEle) { // 没带海拔的（比如手绘的）用本机的离线地形补上
+    let ele = null; try { ele = await sampleElev(pts); } catch (e) { ele = null; }
+    if (ele) { let k = 0; for (const a of d.segs) for (let i = 0; i < a.length; i += 4) { a[i + 2] = Number.isFinite(ele[k]) ? Math.round(ele[k] * 10) / 10 : NaN; k++; } }
+  }
+  const tmp = { segs: d.segs }; analyze(tmp);
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const hint = ios && !standalone ? '\n\n（如果你已经把 App 装到主屏幕：这里存的路线不会出现在主屏幕的 App 里，请回到 App，在「设置 → 路线数据 → 导入分享链接」里粘贴这条链接。）' : '';
+  if (!confirm(`收到一条分享的路线：\n「${d.name}」 ${fmtKm(tmp.dist)}${tmp.gain != null ? `，爬升约 ${Math.round(tmp.gain)} m` : ''}\n\n保存到「我的路线」吗？${hint}`)) return;
+  const rec = { key, file: '分享链接', name: d.name, color: colorAt(S.colorSeq++), visible: true, added: Date.now(), wpts: [] };
+  let id;
+  try { id = DB.ok ? await DB.add(rec, d.segs) : -(routes.length + 1); } catch (e) { DB.ok = false; id = -(routes.length + 1); toast('这台设备不让保存数据（' + e.message + '），路线只在本次打开期间有效', 8000); }
+  rec.id = id;
+  const r = addRoute(rec, d.segs);
+  saveS(); renderList(); refreshSettings();
+  select(r, { open: true, fit: true });
+  toast(`已保存「${d.name}」`);
+}
+// 打开的地址带 #s=…（别人发来的链接）：处理完就把地址栏里那一长串去掉，免得刷新一次又问一次
+function openSharedFromHash() {
+  if (!/(?:^#|&)s=[A-Za-z0-9_-]+/.test(location.hash)) return;
+  const h = location.hash;
+  try { history.replaceState(null, '', location.pathname + location.search + (/(?:^#|&)debug\b/.test(h) ? '#debug' : '')); } catch (e) { /* 忽略 */ }
+  return openShared(h);
+}
+
+// 分享面板：先把链接算好（几毫秒），点按钮时同步调用系统分享，免得被 iOS 当成"不是用户点的"
+const SH_ = { r: null, url: null, err: '' };
+async function openShare(r) {
+  if (!r) return;
+  SH_.r = r; SH_.url = null; SH_.err = '';
+  $('#shTitle').textContent = `分享「${r.name}」`;
+  $('#shInfo').textContent = [fmtKm(r.dist), r.gain != null && `爬升约 ${Math.round(r.gain)} m`].filter(Boolean).join(' · ');
+  $('#shLink').disabled = true; $('#shLinkNote').textContent = '正在准备链接…';
+  $('#shareSheet').hidden = false;
+  try {
+    const p = await shareEncode(r);
+    if (SH_.r !== r) return;
+    SH_.url = shareUrlOf(p);
+    $('#shLink').disabled = false;
+    $('#shLinkNote').textContent = `对方点开链接就能看到这条路线并保存到自己的 App（链接里是简化过的路线，最多约 ${SHARE_MAX_PTS} 个点，爬升会略有出入；要完整轨迹请发 GPX 文件）。链接 ${SH_.url.length} 个字符。`;
+  } catch (e) {
+    if (SH_.r !== r) return;
+    SH_.err = e.message; $('#shLinkNote').textContent = `这条路线没法做成链接（${e.message}），请发 GPX 文件。`;
+  }
+}
+function closeShare() { $('#shareSheet').hidden = true; SH_.r = null; SH_.url = null; }
+async function shareLink() {
+  const r = SH_.r, url = SH_.url;
+  if (!r || !url) return;
+  const title = r.name, text = `${r.name} · ${fmtKm(r.dist)}${r.gain != null ? ` · 爬升约 ${Math.round(r.gain)} m` : ''}`;
+  closeShare();
+  try { if (navigator.share) { await navigator.share({ title, text, url }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('链接已复制，可以粘贴给别人了'); }
+  catch (e) { prompt('复制这条链接，发给别人：', url); }
 }
 
 /* ================= 屏幕常亮 ================= */
@@ -1619,7 +1783,12 @@ $('#btnFit').onclick = () => { const b = allBounds(); if (b) fitTo(b); else toas
 $('#btnSettings').onclick = openSettings;
 $('#btn3d').onclick = () => set3d(!v3.on);
 $('#btnDraw').onclick = () => (DR.on ? drCancel() : startDraw());
-$('#dExport').onclick = () => { if (selected) exportRoute(selected); };
+$('#dShare').onclick = () => { if (selected) openShare(selected); };
+$('#shClose').onclick = closeShare;
+$('#shareSheet').addEventListener('click', e => { if (e.target === e.currentTarget) closeShare(); });
+$('#shLink').onclick = shareLink;
+$('#shFile').onclick = () => { const r = SH_.r; closeShare(); if (r) exportRoute(r); };
+$('#btnPasteLink').onclick = () => { const t = prompt('把收到的分享链接粘贴到这里：'); if (t && t.trim()) { settings.hidden = true; openShared(t); } };
 $('#drUndo').onclick = () => { DR.pts.pop(); drUpdate(true); };
 $('#drClear').onclick = () => { if (DR.pts.length > 2 && !confirm('清除已经画的线？')) return; DR.pts = []; DR.ele = null; drUpdate(true); };
 $('#drPan').onclick = drTogglePan;
@@ -1670,9 +1839,12 @@ async function loadSaved() {
     for (const m of metas) { const segs = g.get(m.id); if (segs) addRoute(m, segs); }
   } catch (e) { DB.ok = false; toast('这台设备不让保存路线数据（' + e.message + '）。导入的路线只在本次打开期间有效', 9000); }
   renderList();
-  if (routes.length) fitAll();
+  // 打开的是别人发来的分享链接：先不缩放到全部路线（Leaflet 在缩放动画进行中会忽略下一次缩放），等处理完直接缩放到那条路线；没选中任何路线（比如点了取消）再缩放到全部
+  const shared = /(?:^#|&)s=[A-Za-z0-9_-]+/.test(location.hash);
+  if (routes.length && !shared) fitAll();
   refreshSettings();
+  if (shared) Promise.resolve(openSharedFromHash()).finally(() => { if (!selected && routes.length) fitAll(); });
 }
-if (location.hash === '#debug') window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, INFO, select, set3d, candidates2d, candidates3d, tapRoutes, DR, startDraw, exportRoute, gpxOf }; // 测试用：地址后面加 #debug 才暴露
+if (/(?:^#|&)debug\b/.test(location.hash)) window.__app = { map, routes, S, BASE, DEMP, bm, dm, v3, GPS, PF, SH, INFO, select, set3d, candidates2d, candidates3d, tapRoutes, DR, startDraw, exportRoute, gpxOf, shareEncode, shareDecode, shareUrlOf, openShared, openShare, SH_ }; // 测试用：地址后面加 #debug 才暴露
 boot();
 })();
