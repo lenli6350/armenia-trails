@@ -174,6 +174,7 @@ function parseFile(name, text) {
   const ext = name.split('.').pop().toLowerCase();
   const base = name.replace(/\.[^.]+$/, '');
   if (ext === 'geojson' || ext === 'json') return parseGeoJSON(text, base);
+  if (ext !== 'gpx' && ext !== 'kml' && ext !== 'tcx') throw new Error(`不支持的文件类型（.${ext}）；可以导入 .gpx .kml .tcx .geojson 和 .zip 压缩包`);
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   if (doc.getElementsByTagName('parsererror').length) throw new Error('不是有效的 XML');
   return ext === 'gpx' ? parseGPX(doc, base) : ext === 'kml' ? parseKML(doc, base) : parseTCX(doc, base);
@@ -837,23 +838,35 @@ map.on('dragstart', () => { if (GPS.id != null && GPS.follow) { GPS.follow = fal
 
 /* ================= 导入 / 导出 ================= */
 async function importFiles(list) {
-  const files = [...list];
-  if (!files.length) return;
+  const picked = [...list]; // 必须在第一个 await 之前取出，FileList 随后会被清空
+  if (!picked.length) return;
   const known = new Set(routes.map(r => r.key));
   let added = 0, dup = 0, big = 0, custom = null;
   const bad = [];
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    if (files.length > 1) toast(`正在导入 ${i + 1} / ${files.length}：${f.name}`, 60000);
+  // 待导入的文件：普通文件原样放进来；.zip 先展开成里面的轨迹文件（key 用「条目名 + 大小 + CRC」，同一个压缩包再导入一次，重复的会自动跳过）
+  const jobs = [];
+  for (const f of picked) {
+    if (!/\.zip$/i.test(f.name)) { jobs.push({ name: f.name, label: f.name, stamp: [f.name, f.size, f.lastModified].join('|'), text: () => f.text(), file: f }); continue; }
+    try {
+      if (!window.Zip) throw new Error('压缩包读取组件没加载出来');
+      toast(`正在读取压缩包：${f.name}`, 60000);
+      const es = await Zip.readZip(f);
+      if (!es.length) bad.push(`${f.name}（压缩包里没有 gpx / kml / tcx / geojson 文件）`);
+      for (const e of es) jobs.push({ name: e.name.split('/').pop(), label: `${f.name} › ${e.name}`, stamp: `zip:${e.name}|${e.size}|${e.crc}`, text: async () => new TextDecoder('utf-8').decode(await e.read()) });
+    } catch (e) { bad.push(`${f.name}（${e.message}）`); }
+  }
+  for (let i = 0; i < jobs.length; i++) {
+    const f = jobs[i];
+    if (jobs.length > 1) toast(`正在导入 ${i + 1} / ${jobs.length}：${f.name}`, 60000);
     try {
       const ext = f.name.split('.').pop().toLowerCase();
-      if (ext === 'pmtiles') { custom = f; continue; }
+      if (ext === 'pmtiles' && f.file) { custom = f.file; continue; }
       const text = await f.text();
-      const stamp = [f.name, f.size, f.lastModified].join('|');
+      const stamp = f.stamp;
       let items;
       if (ext === 'json' && /"format"\s*:\s*"armenia-trails-backup"/.test(text.slice(0, 400))) items = fromBackup(JSON.parse(text));
       else items = parseFile(f.name, text).map((p, j) => ({ key: `${stamp}#${j}`, name: p.name, segs: p.segs.map(pack), wpts: p.wpts }));
-      if (!items.length) { bad.push(`${f.name}（里面没有轨迹）`); continue; }
+      if (!items.length) { bad.push(`${f.label}（里面没有轨迹）`); continue; }
       for (const it of items) {
         if (known.has(it.key)) { dup++; continue; }
         known.add(it.key);
@@ -865,7 +878,7 @@ async function importFiles(list) {
         if (it.visible === undefined && r.dist > 300000) { setVisible(r, false, true); saveMeta([r]); big++; } // 超长的多半是整片路网（比如 OSM 的所有土路），默认先隐藏，免得盖住别的路线
         added++;
       }
-    } catch (e) { bad.push(`${f.name}（${e.message}）`); }
+    } catch (e) { bad.push(`${f.label}（${e.message}）`); }
   }
   saveS();
   renderList();
